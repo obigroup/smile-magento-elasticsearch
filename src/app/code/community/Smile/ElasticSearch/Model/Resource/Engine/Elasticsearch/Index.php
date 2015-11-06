@@ -472,6 +472,8 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
 
             $indices = $this->getClient()->indices();
             $alias = $this->getConfig('alias');
+            $params = array('index' => $this->getCurrentName());
+            $indices->close($params);
             $indices->putSettings(
                 array(
                     'index' => $this->getCurrentName(),
@@ -481,6 +483,7 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
                     )
                 )
             );
+            $indices->open($params);
 
             $deletedIndices = array();
             $aliasActions = array();
