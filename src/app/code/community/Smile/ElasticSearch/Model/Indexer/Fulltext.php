@@ -37,9 +37,9 @@ class Smile_ElasticSearch_Model_Indexer_Fulltext extends Mage_CatalogSearch_Mode
     /**
      * (Dummy) Process event
      *
-     * @param   Mage_Index_Model_Event $event Indexer event
+     * @param Mage_Index_Model_Event $event Indexer event
      *
-     * @return  Mage_Index_Model_Indexer_Abstract
+     * @return Mage_Index_Model_Indexer_Abstract
      */
     public function processEvent(Mage_Index_Model_Event $event)
     {
@@ -137,12 +137,12 @@ class Smile_ElasticSearch_Model_Indexer_Fulltext extends Mage_CatalogSearch_Mode
             if (isset($data['catalogsearch_status'])) {
                 $status = $data['catalogsearch_status'];
                 if ($status == Mage_Catalog_Model_Product_Status::STATUS_ENABLED) {
-                    $this->_getIndexer()
-                        ->rebuildIndex(null, $productIds)
-                        ->resetSearchResults();
+                    $this->_getMapping('product')->rebuildIndex(null, $productIds);
+                    $this->_getIndexer()->resetSearchResults();
                 } else {
                     $this->_getIndexer()->cleanIndex(null, $productIds);
-                    $this->_getMapping('product')->resetSearchResults();
+                    $this->_getMapping('product')->rebuildIndex(null, $productIds);
+                    $this->_getIndexer()->resetSearchResults();
                 }
             }
             if (isset($data['catalogsearch_force_reindex'])) {

@@ -20,6 +20,8 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_QueryG
     extends Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_Abstract
 {
     /**
+     * Default Options.
+     *
      * @var array
      */
     protected $_options = array(
@@ -32,7 +34,7 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_QueryG
      *
      * @return array
      */
-    public function getFacetQuery()
+    protected function _getFacetQuery()
     {
         $queries = array();
         $prefix = $this->getPrefix();
@@ -73,9 +75,14 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_QueryG
      *
      * @return array
      */
-    public function getItems($response)
+    public function getItems($response = null)
     {
         $result = array();
+
+        if ($response == null && $this->_response) {
+            $response = $this->_response;
+        }
+
         $prefix = $this->getPrefix();
         foreach ($response as $facetName => $facet) {
             if (strpos($facetName, $prefix) === 0) {
@@ -83,11 +90,6 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_QueryG
                 $result[$key] = $facet['count'];
             }
         }
-        /*if (isset($response['entries'])) {
-            foreach ($response['entries'] as $value) {
-                $result[$value['key']] = $value['count'];
-            }
-        }*/
         return $result;
     }
 }

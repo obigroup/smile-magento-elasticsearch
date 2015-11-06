@@ -20,19 +20,39 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
     extends Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Abstract
 {
     /**
+     * Collection of all attributes.
+     *
      * @var Mage_Eav_Model_Resource_Attribute_Collection
      */
     protected $_attributeCollectionModel;
 
     /**
+     * Generated or loaded mapping.
+     *
      * @var array
      */
     protected $_mapping                  = null;
 
     /**
+     * List of backends authorized for indexing.
+     *
      * @var array
      */
     protected $_authorizedBackendModels  = array();
+
+    /**
+     * Store all attributes by ids
+     *
+     * @var
+     */
+    protected $_attributesById;
+
+    /**
+     * Cache of option text indexed by value (added to increase pefrormance into _getOptionText method.
+     *
+     * @var array
+     */
+    protected $_indexedOptionText = array();
 
     /**
      * Get mapping properties as stored into the index
@@ -41,20 +61,21 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
      */
     protected function _getMappingProperties()
     {
-        $mapping = array('properties' => array());
+        $mapping = array(
+            '_all' => array('enabled' => false),
+            'properties' => array()
+        );
 
-        $entityType = Mage::getModel('eav/entity_type')->loadByCode($this->_entityType);
+        $mapping['properties'] = $this->_getSpellingFieldMapping();
 
-        $attributes = Mage::getResourceModel($this->_attributeCollectionModel)
-            ->setEntityTypeFilter($entityType->getEntityTypeId());
-
+        $attributes = $this->_getAttributesById();
         foreach ($attributes as $attribute) {
             $mapping['properties'] = array_merge($mapping['properties'], $this->_getAttributeMapping($attribute));
         }
 
-        $mapping['properties']['unique']   = array('type' => 'string');
-        $mapping['properties']['id']       = array('type' => 'long');
-        $mapping['properties']['store_id'] = array('type' => 'integer');
+        $mapping['properties']['unique']   = array('type' => 'string', 'store' => false, 'index' => 'not_analyzed');
+        $mapping['properties']['id']       = array('type' => 'long', 'store' => false, 'index' => 'not_analyzed');
+        $mapping['properties']['store_id'] = array('type' => 'integer', 'store' => false, 'index' => 'not_analyzed');
 
         return $mapping;
     }
@@ -74,80 +95,48 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
             $attributeCode = $attribute->getAttributeCode();
             $type = $this->_getAttributeType($attribute);
 
+            $isFacet = (bool) ($attribute->getIsFilterable() || $attribute->getIsFilterableInSearch());
+            $isFuzzy = (bool) $attribute->getIsFuzzinessEnabled();
+            $usedForSortBy = (bool) $attribute->getUsedForSortBy();
+            $isAutocomplete = (bool) ($attribute->getIsUsedInAutocomplete() || $attribute->getIsDisplayedInAutocomplete());
+
             if ($type === 'string' && !$attribute->getBackendModel() && $attribute->getFrontendInput() != 'media_image') {
-                foreach (Mage::app()->getStores() as $store) {
-                    $languageCode = Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($store);
+                foreach ($this->_stores as $store) {
+                    $languageCode = $this->_helper->getLanguageCodeByStore($store);
                     $fieldName = $attributeCode . '_' . $languageCode;
-                    $mapping[$fieldName] = array('type' => $type, 'analyzer' => 'analyzer_' . $languageCode);
+                    $mapping[$fieldName] = array('type' => $type, 'analyzer' => 'analyzer_' . $languageCode, 'store' => false);
 
                     $multiTypeField = $attribute->getBackendType() == 'varchar' || $attribute->getBackendType() == 'text';
                     $multiTypeField = $multiTypeField && !($attribute->usesSource());
 
                     if ($multiTypeField) {
                         $fieldMapping = $this->_getStringMapping(
-                            $fieldName,
-                            $languageCode,
-                            $type,
-                            $attribute->getBackendType() == 'varchar'
+                            $fieldName, $languageCode, $type, $usedForSortBy, $isFuzzy, $isFacet, $isAutocomplete
                         );
                         $mapping = array_merge($mapping, $fieldMapping);
                     }
                 }
             } else if ($type === 'date') {
                 $mapping[$attributeCode] = array(
+                    'store' => false,
                     'type' => $type,
                     'format' => implode('||', array(Varien_Date::DATETIME_INTERNAL_FORMAT, Varien_Date::DATE_INTERNAL_FORMAT))
                 );
             } else {
-                $mapping[$attributeCode] = array('type' => $type);
+                $mapping[$attributeCode] = array(
+                    'type' => $type, 'store' => false, 'fielddata' => array('format' => $type == 'string' ? 'disabled' :'doc_values')
+                );
             }
 
             if ($attribute->usesSource()) {
-                foreach (Mage::app()->getStores() as $store) {
-                    $languageCode = Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($store);
+                foreach ($this->_stores as $store) {
+                    $languageCode = $this->_helper->getLanguageCodeByStore($store);
                     $fieldName = 'options' . '_' .  $attributeCode . '_' . $languageCode;
-                    $fieldMapping = $this->_getStringMapping($fieldName, $languageCode);
+                    $fieldMapping = $this->_getStringMapping(
+                        $fieldName, $languageCode, 'string', $usedForSortBy, $isFuzzy, $isFacet, $isAutocomplete
+                    );
                     $mapping = array_merge($mapping, $fieldMapping);
                 }
-            }
-        }
-
-        return $mapping;
-    }
-
-    /**
-     * Return mapping for an attribute of type varchar
-     *
-     * @param string $fieldName    Name of the field
-     * @param string $languageCode Language code we want the mapping for
-     * @param string $type         ES core type (string default)
-     * @param bool   $sortable     Can the attribute be used for sorting
-     *
-     * @return array string
-     */
-    protected function _getStringMapping($fieldName, $languageCode, $type = 'string', $sortable = false)
-    {
-        $mapping = array();
-
-        $analyzers = array('edge_ngram_front', 'edge_ngram_back', 'shingle');
-
-        if ($sortable == true) {
-            $analyzers[] = 'sortable';
-        }
-
-        $analyzersOptions = array(
-            'edge_ngram_front' => array('norms' => array('enabled' => false, 'index_options' => 'docs')),
-            'edge_ngram_back' => array('norms' => array('enabled' => false, 'index_options' => "docs"))
-        );
-        $mapping[$fieldName] = array('type' => 'multi_field', 'fields' => array());
-        $mapping[$fieldName]['fields'][$fieldName] = array('type' => $type, 'analyzer' => 'analyzer_' . $languageCode);
-        $mapping[$fieldName]['fields']['untouched'] = array('type' => $type, 'index' => 'not_analyzed');
-
-        foreach ($analyzers as $analyzer) {
-            $mapping[$fieldName]['fields'][$analyzer] = array('type' => $type, 'analyzer' => $analyzer, 'stored' => false);
-
-            if (isset($analyzersOptions[$analyzer])) {
-                $mapping[$fieldName]['fields'][$analyzer] = array_merge($mapping[$fieldName]['fields'][$analyzer], $analyzersOptions[$analyzer]);
             }
         }
 
@@ -166,7 +155,7 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
         $type = 'string';
         if ($attribute->getBackendType() == 'int' || $attribute->getFrontendClass() == 'validate-digits') {
             $type = 'integer';
-        } elseif ($attribute->getBackendType() == 'decimal') {
+        } elseif ($attribute->getBackendType() == 'decimal' || $attribute->getFrontendClass() == 'validate-number') {
             $type = 'double';
         } elseif ($attribute->getSourceModel() == 'eav/entity_attribute_source_boolean') {
             $type = 'boolean';
@@ -211,13 +200,15 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
     public function rebuildIndex($storeId = null, $ids = null)
     {
         if (is_null($storeId)) {
-            $storeIds = array_keys(Mage::app()->getStores());
+            $storeIds = array_keys($this->_stores);
             foreach ($storeIds as $storeId) {
                 $this->_rebuildStoreIndex($storeId, $ids);
             }
         } else {
             $this->_rebuildStoreIndex($storeId, $ids);
         }
+
+        $this->getCurrentIndex()->refresh();
 
         return $this;
     }
@@ -257,7 +248,7 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
         $store = Mage::app()->getStore($storeId);
         $websiteId = $store->getWebsiteId();
 
-        $languageCode = Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($store);
+        $languageCode = $this->_helper->getLanguageCodeByStore($store);
 
         $dynamicFields = array();
         $attributesById = $this->_getAttributesById();
@@ -279,46 +270,44 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
                 break;
             }
 
-            $ids = array();
+            $ids = array_keys($entities);
+            $lastObjectId = end($ids);
 
-            foreach ($entities as $entityData) {
-                $lastObjectId = $entityData['entity_id'];
-                $ids[]  = $entityData['entity_id'];
-            }
+            $entities = $this->_addAdvancedIndex($entities, $storeId);
 
-            $entityRelations = $this->_getChildrenIds($ids, $websiteId);
-            foreach ($entityRelations as $childrenIds) {
-                $ids = array_merge($ids, $childrenIds);
-            }
+            if (!empty($entities)) {
 
-            $entityIndexes    = array();
-            $entityAttributes = $this->_getAttributes($storeId, $ids, $dynamicFields);
+                $ids = array_keys($entities);
 
-            foreach ($entities as $entityData) {
-
-                if (!isset($entityAttributes[$entityData['entity_id']])) {
-                    continue;
+                $entityRelations = $this->_getChildrenIds($ids, $websiteId);
+                if (!empty($entityRelations)) {
+                    $allChildrenIds = call_user_func_array('array_merge', $entityRelations);
+                    $ids = array_merge($ids, $allChildrenIds);
                 }
 
-                $entityAttr = array();
+                $entityIndexes    = array();
+                $entityAttributes = $this->_getAttributes($storeId, $ids, $dynamicFields);
 
-                foreach ($entityAttributes[$entityData['entity_id']] as $attributeId => $value) {
-                    $attribute = $attributesById[$attributeId];
-                    $entityAttr = array_merge(
-                        $entityAttr,
-                        $this->_getAttributeIndexValues($attribute, $value, $storeId, $languageCode)
-                    );
+                foreach ($entities as &$entityData) {
 
+                    if (!isset($entityAttributes[$entityData['entity_id']])) {
+                        continue;
+                    }
+                    $entityTypeId = isset($entityData['type_id']) ? $entityData['type_id'] : null;
+                    $this->_addChildrenData($entityData['entity_id'], $entityAttributes, $entityRelations, $storeId, $entityTypeId);
+
+                    foreach ($entityAttributes[$entityData['entity_id']] as $attributeId => $value) {
+                        $attribute = $attributesById[$attributeId];
+                        $entityData += $this->_getAttributeIndexValues($attribute, $value, $storeId, $languageCode);
+                    }
+
+                    $entityData['store_id'] = $storeId;
+                    $entityData[Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch::UNIQUE_KEY] = $entityData['entity_id'] . '|' . $storeId;
+                    $entityIndexes[$entityData['entity_id']] = $entityData;
                 }
 
-                $entityAttr = array_merge($entityData, $entityAttr);
-                $entityAttr['store_id'] = $storeId;
-                $entityIndexes[$entityData['entity_id']] = $entityAttr;
+                $this->_saveIndexes($storeId, $entityIndexes);
             }
-
-            $entityIndexes = $this->_addChildrenData($entityIndexes, $entityAttributes, $entityRelations, $storeId, $languageCode);
-
-            $this->_saveIndexes($storeId, $entityIndexes);
         }
 
         return $this;
@@ -343,15 +332,15 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
             if ($field) {
                 $storedValue = $this->_getAttributeValue($attribute, $value, $storeId);
 
-                if ($storedValue != null && $storedValue != false && $storedValue != '0000-00-00 00:00:00') {
+                if ($storedValue != null && $storedValue != false && $storedValue != '0000-00-00 00:00:00' && !empty($storedValue)) {
                     $attrs[$field] = $storedValue;
-                }
 
-                if ($attribute->usesSource() && $attribute->getSourceModel()) {
-                    $field = 'options_' . $attribute->getAttributeCode() . '_' . $languageCode;
-                    $value = $this->_getOptionsText($attribute, $value, $storeId);
-                    if ($value) {
-                        $attrs[$field] = $value;
+                    if ($attribute->usesSource()) {
+                        $field = 'options_' . $attribute->getAttributeCode() . '_' . $languageCode;
+                        $optionValue = $this->_getOptionsText($attribute, $storedValue, $storeId);
+                        if ($optionValue) {
+                            $attrs[$field] = $optionValue;
+                        }
                     }
                 }
             }
@@ -367,73 +356,53 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
      */
     protected function _getAttributesById()
     {
-        $entityType = Mage::getModel('eav/entity_type')->loadByCode($this->_entityType);
-        $attributes = Mage::getResourceModel($this->_attributeCollectionModel)
-            ->setEntityTypeFilter($entityType->getEntityTypeId());
+        if ($this->_attributesById === null) {
+            $entityType = Mage::getModel('eav/entity_type')->loadByCode($this->_entityType);
+            $attributes = Mage::getResourceModel($this->_attributeCollectionModel)
+                ->setEntityTypeFilter($entityType->getEntityTypeId());
 
-        $attributesById = array();
+            if (method_exists($attributes, 'addToIndexFilter')) {
+                $attributes->addToIndexFilter(true);
+            }
 
-        foreach ($attributes as $attribute) {
-            if ($this->_canIndexAttribute($attribute) && $attribute->getBackendType() != 'static') {
-                $attributesById[$attribute->getAttributeId()] = $attribute;
+            $this->_attributesById = array();
+
+            foreach ($attributes as $attribute) {
+                if ($this->_canIndexAttribute($attribute)) {
+                    $this->_attributesById[$attribute->getAttributeId()] = $attribute;
+                }
             }
         }
 
-        return $attributesById;
+        return $this->_attributesById;
     }
 
     /**
      * Append children attributes to parents doc.
      *
-     * @param array  $entityIndexes    Final index results
-     * @param array  $entityAttributes Attributes values by entity id
-     * @param array  $entityRelations  Array of the entities relations
-     * @param int    $storeId          Store id
-     * @param string $languageCode     Locale
+     * @param int    $parentId          Entity id
+     * @param array  &$entityAttributes Attributes values by entity id
+     * @param array  $entityRelations   Array of the entities relations
+     * @param int    $storeId           Store id
+     * @param string $entityTypeId      Type of the parent entity
+     *
+     * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Catalog_Eav_Abstract
+     */
+    protected function _addChildrenData($parentId, &$entityAttributes, $entityRelations, $storeId, $entityTypeId)
+    {
+        return $this;
+    }
+
+    /**
+     * Append additional data to the index
+     *
+     * @param array $entityIndexes Indexed data
+     * @param int   $storeId       Store id
      *
      * @return array
      */
-    protected function _addChildrenData($entityIndexes, $entityAttributes, $entityRelations, $storeId, $languageCode)
+    protected function _addAdvancedIndex($entityIndexes, $storeId)
     {
-
-        $attributesById = $this->_getAttributesById();
-
-        foreach ($entityRelations as $parentId => $childrenIds) {
-
-            $values = $entityIndexes[$parentId];
-
-            foreach ($childrenIds as $childrenId) {
-                if (isset($entityAttributes[$childrenId])) {
-
-                    foreach ($entityAttributes[$childrenId] as $attributeId => $value) {
-
-                        $isAttributeIndexed = isset($attributesById[$attributeId]);
-                        $frontendInput      = $isAttributeIndexed ? $attributesById[$attributeId]->getFrontendInput() : false;
-                        $isAttributeIndexed =  $isAttributeIndexed && in_array($frontendInput, array('select', 'multiselect'));
-
-                        if ($isAttributeIndexed == true) {
-                            $attribute = $attributesById[$attributeId];
-                            $childrenValues = $this->_getAttributeIndexValues($attribute, $value, $storeId, $languageCode);
-                            foreach ($childrenValues as $field => $fieldValue) {
-                                $parentValue = array();
-
-                                if (!is_array($fieldValue)) {
-                                    $fieldValue = array($fieldValue);
-                                }
-
-                                if (isset($values[$field])) {
-                                    $parentValue = is_array($values[$field]) ? $values[$field] : array($values[$field]);
-                                }
-                                $values[$field] = array_unique(array_merge($parentValue, $fieldValue));
-                            }
-                        }
-                    }
-                }
-            }
-
-            $entityIndexes[$parentId] = $values;
-        }
-
         return $entityIndexes;
     }
 
@@ -502,7 +471,7 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
                 /**
                  * Add additional external limitation
                 */
-                $eventName = sprintf('prepare_catalog_%s_index_select', $this->_type);
+                $eventName = sprintf('prepare_catalog_atttibutes_%s_index_select', $this->_type);
                 Mage::dispatchEvent(
                     $eventName,
                     array(
@@ -521,7 +490,9 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
             $select = $adapter->select()->union($selects, Zend_Db_Select::SQL_UNION_ALL);
             $query = $adapter->query($select);
             while ($row = $query->fetch()) {
-                $result[$row['entity_id']][$row['attribute_id']] = $row['value'];
+                if ($row['value'] !== null) {
+                    $result[$row['entity_id']][$row['attribute_id']] = $row['value'];
+                }
             }
         }
 
@@ -540,19 +511,21 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
     protected function _getAttributeValue($attribute, $value, $storeId)
     {
         if ($attribute->usesSource()) {
-            $inputType = $attribute->getFrontend()->getInputType();
-            if ($inputType == 'multiselect') {
+            if (!is_array($value)) {
                 $value = explode(',', $value);
             }
-        } else {
-            $inputType = $attribute->getFrontend()->getInputType();
-            if ($inputType == 'price') {
-                $value = Mage::app()->getStore($storeId)->roundPrice($value);
+            $value = array_filter($value);
+            $value = array_values(array_unique($value));
+            if ($attribute->getBackendType() == 'int') {
+                $value = array_map('intval', $value);
             }
-        }
-
-        if (is_string($value)) {
-            $value = preg_replace("#\s+#siu", ' ', trim(strip_tags($value)));
+            if (count($value) == 1) {
+                $value = current($value);
+            }
+        } else if ($attribute->getBackendType() == 'decimal') {
+            $value = floatval($value);
+        } else if ($attribute->getBackendType() == 'int') {
+            $value = intval($value);
         }
 
         return $value;
@@ -568,8 +541,9 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
      */
     protected function _getAttributeFieldName($attribute, $languageCode)
     {
+        $mapping = $this->getMappingProperties();
+        $mapping = $mapping['properties'];
 
-        $mapping = $this->getMappingProperties()['properties'];
         $fieldName = $attribute->getAttributeCode();
 
         if (!isset($mapping[$fieldName])) {
@@ -584,9 +558,6 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
     }
 
     /**
-
-
-    /**
      * Return the text value for an atribute using source model.
      *
      * @param Mage_Eav_Model_Attribute $attribute Attribute we want the value for.
@@ -597,61 +568,128 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
      */
     protected function _getOptionsText($attribute, $value, $storeId)
     {
-        $attribute->setStoreId($storeId);
-        if ($attribute->getSource()) {
-            $value = $attribute->getSource()->getIndexOptionText($value);
+        $attributeId = $attribute->getAttributeId();
+        if (!isset($this->_indexedOptionText[$attributeId]) || !isset($this->_indexedOptionText[$attributeId][$storeId])) {
+            $this->_getAllOptionsText($attribute, $storeId);
         }
+
+        if (is_array($value)) {
+            $value = array_values(array_intersect_key($this->_indexedOptionText[$attributeId][$storeId], array_flip($value)));
+            if (empty($value)) {
+                $value = false;
+            } else if (count($value) == 1) {
+                $value = current($value);
+            }
+        } else {
+            $value = (string) trim($value, ',');
+            if (isset($this->_indexedOptionText[$attributeId][$storeId][$value])) {
+                $value = $this->_indexedOptionText[$attributeId][$storeId][$value];
+            } else {
+                $value == false;
+            }
+        }
+
         return $value;
+    }
+
+    /**
+     * Load all options for an attribute using source.
+     *
+     * @param Mage_Eav_Model_Attribute $attribute Attribute we want the value for.
+     * @param int                      $storeId   Store id.
+     *
+     * @return array
+     */
+    protected function _getAllOptionsText($attribute, $storeId)
+    {
+        $attributeId = $attribute->getAttributeId();
+        if (!isset($this->_indexedOptionText[$attributeId]) || !isset($this->_indexedOptionText[$attributeId][$storeId])) {
+            $options = array();
+            if ($attribute->getSource()) {
+                $storeIds = array(0, $storeId);
+                foreach ($storeIds as $storeId) {
+                    $attribute->setStoreId($storeId);
+                    $allOptions = $attribute->getSource()->getAllOptions(false);
+                    foreach ($allOptions as $key => $value) {
+                        if (is_array($value) && isset($value['value'])) {
+                            $options[$value['value']] = $value['label'];
+                        } else {
+                            $options[$key] = $value;
+                        }
+                    }
+                }
+            }
+            $this->_indexedOptionText[$attributeId][$storeId] = $options;
+        }
+
+        return $this->_indexedOptionText[$attributeId][$storeId];
     }
 
     /**
      * Return a list of all searchable field for the current type (by locale code).
      *
-     * @param string $localeCode Locale code
+     * @param string $languageCode Language code.
+     * @param string $searchType   Type of search currentlty used.
+     * @param string $analyzer     Allow to force the analyzer used for the field (whitespace, ...).
      *
      * @return array.
      */
-    public function getSearchFields($localeCode)
+    public function getSearchFields($languageCode, $searchType = null, $analyzer = null)
     {
-        if ($this->_searchFields == null) {
+        if ($searchType == null) {
+            $searchType = self::SEARCH_TYPE_NORMAL;
+        }
+
+        if ($analyzer == null) {
+            $analyzer = $this->_getDefaultAnalyzerBySearchType($languageCode, $searchType);
+        }
+
+        if (!isset($this->_searchFields[$searchType . $analyzer])) {
 
             $mapping = $this->getMappingProperties();
-            $this->_searchFields = array();
+            $this->_searchFields[$searchType . $analyzer] = $this->_getDefaultSearchFieldBySearchType($languageCode, $searchType);
+            $hasDefaultField = !empty($this->_searchFields[$searchType]);
 
             $entityType = Mage::getModel('eav/entity_type')->loadByCode($this->_entityType);
 
             $attributes = Mage::getResourceModel($this->_attributeCollectionModel)
-                ->setEntityTypeFilter($entityType->getEntityTypeId());
+                ->setEntityTypeFilter($entityType->getEntityTypeId())
+                ->addFieldToFilter('is_searchable', 1);
 
             foreach ($attributes as $attribute) {
-
-                if ($attribute->getIsSearchable() || $attribute->getAttributeCode() == 'name') {
-
-                    $field = $this->getFieldName($attribute->getAttributeCode(), $localeCode);
-
-                    if ($field !== false) {
-                        $currentAttributeConfig = array(
-                            'weight'               => $attribute->getSearchWeight() ? $attribute->getSearchWeight() : 1,
-                            'fuzziness'            => $attribute->getIsFuzzinessEnabled() ? $attribute->getFuzzinessValue() : false,
-                            'prefix_length'        => $attribute->getIsFuzzinessEnabled() ? $attribute->getFuzzinessPrefixLength() : false,
-                            'used_in_autocomplete' => (bool) $attribute->getIsUsedInAutocomplete()
-                        );
-
-                        if ($this->_mapping['properties'][$field]['type'] == "multi_field") {
-                            if ($attribute->getIsSnowballUsed()) {
-                                $this->_searchFields[$field] = $currentAttributeConfig;
-                            }
-
-                            $this->_searchFields[$field.'.shingle'] = $currentAttributeConfig;
-                        } else {
-                            $this->_searchFields[$field] = $currentAttributeConfig;
-                        }
+                $isAttributeSearchable = $this->_isAttributeUsedForSearchType($attribute, $searchType);
+                if ($isAttributeSearchable) {
+                    $field = $this->getFieldName($attribute->getAttributeCode(), $languageCode, self::FIELD_TYPE_SEARCH, $analyzer);
+                    $weight = (int) $attribute->getSearchWeight();
+                    if ($field !== false && $weight > 0 && !($hasDefaultField && $weight == 1)) {
+                        $this->_searchFields[$searchType . $analyzer][] = $field . '^' . $weight;
                     }
                 }
             }
         }
 
-        return $this->_searchFields;
+        return $this->_searchFields[$searchType . $analyzer];
+    }
+
+    /**
+     * Indicates if an attribute is used into a search type.
+     *
+     * @param Mage_Eav_Model_Attribute $attribute  Attribute we want the value for.
+     * @param string                   $searchType Search type
+     *
+     * @return boolean
+     */
+    protected function _isAttributeUsedForSearchType($attribute, $searchType)
+    {
+        $isSearchable = $attribute->getIsSearchable() || $attribute->getAttributeCode() == 'name';
+
+        if (in_array($searchType, array(self::SEARCH_TYPE_FUZZY, self::SEARCH_TYPE_PHONETIC))) {
+            $isSearchable = $isSearchable && (bool) $attribute->getIsFuzzinessEnabled();
+        } else if ($searchType == self::SEARCH_TYPE_AUTOCOMPLETE) {
+            $isSearchable = $isSearchable && (bool) $attribute->getIsUsedInAutocomplete();
+        }
+
+        return $isSearchable;
     }
 
     /**
@@ -660,9 +698,8 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_C
      * @param int         $storeId Store id
      * @param string|null $ids     Ids filter
      * @param int         $lastId  First id
-     * @param int         $limit   Size of the bucket
      *
      * @return array
      */
-    abstract protected function _getSearchableEntities($storeId, $ids = null, $lastId = 0, $limit = 100);
+    abstract protected function _getSearchableEntities($storeId, $ids = null, $lastId = 0);
 }

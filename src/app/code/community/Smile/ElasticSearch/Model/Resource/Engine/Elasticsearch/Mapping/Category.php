@@ -48,12 +48,12 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Category
      * @param int         $storeId Store id
      * @param string|null $ids     Ids filter
      * @param int         $lastId  First id
-     * @param int         $limit   Size of the bucket
      *
      * @return array
      */
-    protected function _getSearchableEntities($storeId, $ids = null, $lastId = 0, $limit = 100)
+    protected function _getSearchableEntities($storeId, $ids = null, $lastId = 0)
     {
+        $limit = $this->_getBatchIndexingSize();
         $rootCategoryId = Mage::app()->getStore($storeId)->getRootCategoryId();
         $rootCategory = Mage::getModel('catalog/category')->load($rootCategoryId);
         $rootPath = $rootCategory->getPath();
@@ -76,7 +76,11 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Category
             ->limit($limit)
             ->order('e.entity_id');
 
-        $result = $adapter->fetchAll($select);
+        $result = array();
+        $values = $adapter->fetchAll($select);
+        foreach ($values as $value) {
+            $result[$value['entity_id']] = $value;
+        }
 
         return $result;
     }

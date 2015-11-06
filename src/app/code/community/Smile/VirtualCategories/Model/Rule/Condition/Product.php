@@ -63,23 +63,9 @@ class Smile_VirtualCategories_Model_Rule_Condition_Product extends Mage_CatalogR
      */
     public function loadAttributeOptions()
     {
-        $productAttributes = Mage::getResourceSingleton('catalog/product')
-            ->loadAllAttributes()
-            ->getAttributesByCode();
-
         $attributes = array();
-        foreach ($productAttributes as $attribute) {
-            foreach ($this->_isUsedForRuleProperty as $usedField) {
-                if (!$attribute->isAllowedForRuleCondition() || !$attribute->getDataUsingMethod($usedField)) {
-                    continue;
-                }
-                $attributes[$attribute->getAttributeCode()] = $attribute->getFrontendLabel();
-            }
-        }
-
-        $this->_addSpecialAttributes($attributes);
-
-        asort($attributes);
+        $attributeLoader = Mage::getSingleton('smile_virtualcategories/rule_condition_product_attribute');
+        $attributes = $attributeLoader->loadAttributeOptions();
         $this->setAttributeOption($attributes);
 
         return $this;
@@ -128,9 +114,12 @@ class Smile_VirtualCategories_Model_Rule_Condition_Product extends Mage_CatalogR
                 $query = $not == true ? '-' . $query : $query;
             }
         } else {
-            $category = Mage::getModel('catalog/category')->load($value);
+            $category = Mage::getModel('catalog/category')
+                ->setStoreId($this->getStore()->getId())
+                ->load($value);
             if ($category->getId() && !in_array($value, $excludedCategories)) {
-                $virtualRule = $category->getVirtualRule();
+                $virtualRule = Mage::helper('smile_virtualcategories')->getVirtualRule($category);
+                $virtualRule->setStore($this->getStore());
                 $query = '(' . $virtualRule->getSearchQuery($excludedCategories) . ')';
                 $this->getRule()->addUsedCategoryIds($virtualRule->getUsedCategoryIds());
             }
@@ -218,6 +207,7 @@ class Smile_VirtualCategories_Model_Rule_Condition_Product extends Mage_CatalogR
 
         } else {
             $template = $this->_queryTemplates[$operator];
+            $attribute = $this->getFilterField($attribute);
             $query    = str_replace(array('#{field}', '#{value}'), array($attribute, $value), $template);
         }
 
@@ -240,22 +230,6 @@ class Smile_VirtualCategories_Model_Rule_Condition_Product extends Mage_CatalogR
     }
 
     /**
-     * Add special attributes
-     *
-     * @param array $attributes List of existing attributes
-     *
-     * @return void
-     */
-    protected function _addSpecialAttributes(array &$attributes)
-    {
-        $attributes['category_ids'] = Mage::helper('catalogrule')->__('Category');
-        $attributes['in_stock'] = Mage::helper('smile_virtualcategories')->__('Only in stock products');
-        $attributes['has_image'] = Mage::helper('smile_virtualcategories')->__('Only products with images');
-        $attributes['has_discount'] = Mage::helper('smile_virtualcategories')->__('Only discounted products');
-        $attributes['is_new'] = Mage::helper('smile_virtualcategories')->__('Only new products');
-    }
-
-    /**
      * Return the ES field name to build filter.
      *
      * @return string
@@ -265,7 +239,8 @@ class Smile_VirtualCategories_Model_Rule_Condition_Product extends Mage_CatalogR
         $fieldName = $this->getMapping()->getFieldName($this->getAttribute(), $this->getLocaleCode(), 'filter');
 
         if ($this->getAttribute() == 'price' || $this->getAttribute() == 'has_discount') {
-            $websiteId = Mage::app()->getStore()->getWebsiteId();
+            $store = $this->getStore();
+            $websiteId = $store->getWebsiteId();
             $customerGroupId = Mage::getSingleton('customer/session')->getCustomerGroupId();
             $fieldName = $this->getAttribute() . '_' . $customerGroupId . '_' . $websiteId;
         }
@@ -346,8 +321,19 @@ class Smile_VirtualCategories_Model_Rule_Condition_Product extends Mage_CatalogR
      */
     public function getLocaleCode()
     {
-        $store = Mage::app()->getStore();
+        $store = $this->getStore();
         $languageCode = Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($store);
         return $languageCode;
+    }
+
+    /**
+     * Get the current store.
+     *
+     * @return Mage_Core_Model_Store
+     */
+    public function getStore()
+    {
+        $store = $this->getRule()->getStore();
+        return $store;
     }
 }

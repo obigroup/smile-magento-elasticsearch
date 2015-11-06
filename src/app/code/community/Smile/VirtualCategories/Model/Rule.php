@@ -24,11 +24,15 @@ class Smile_VirtualCategories_Model_Rule extends Mage_Rule_Model_Rule
     const CACHE_KEY_PREFIX = 'SMILE_VIRTUALCATEGORIES_RULES';
 
     /**
+     * Local cache for queries.
+     *
      * @var array
      */
     private $_queryCache = array();
 
     /**
+     * Categories already used into query generation. Avoid infinte loop.
+     *
      * @var array
      */
     private $_usedCategories = array();
@@ -139,11 +143,12 @@ class Smile_VirtualCategories_Model_Rule extends Mage_Rule_Model_Rule
             $this->_usedCategories = array();
             $this->addUsedCategoryIds($category->getId());
             if ($category->getIsVirtual()) {
+                $this->getConditions()->setRule($this);
                 $query = $this->getConditions()->getSearchQuery($excludedCategories);
             } else {
-                $query = array('categories:' . $category->getId());
-                $childrenQueries = $this->getChildrenCategoryQueries($excludedCategories);
-                $query = implode(' OR ', array_merge($query, $childrenQueries));
+                $query = '(categories:' . $category->getId() . ') OR (show_in_categories:' . $category->getId() . ')';
+                $childrenQueries = $this->getChildrenCategoryQueries($excludedCategories, true);
+                $query = implode(' OR ', array_merge(array($query), $childrenQueries));
             }
 
             if (empty($excludedCategories)) {
@@ -152,7 +157,6 @@ class Smile_VirtualCategories_Model_Rule extends Mage_Rule_Model_Rule
         } else {
             list($query, $this->_usedCategories) = $cacheData;
         }
-
         return $query;
     }
 
@@ -162,33 +166,103 @@ class Smile_VirtualCategories_Model_Rule extends Mage_Rule_Model_Rule
      * - Used to build category facet
      * - Compute inhereted products queries
      *
-     * @param array $excludedCategories Indicates if some categories should be excluded (avoid infinite loops)
+     * @param array $excludedCategories Indicates if some categories should be excluded (avoid infinite loops).
+     * @param bool  $onlyVirtual        Indicates if you want to fetch only rules for children that are virtual categories.
+     * @param bool  $depth              Indicates if you want to fetch only rules for children with a max depth.
      *
      * @return array
      */
-    public function getChildrenCategoryQueries($excludedCategories = array())
+    public function getChildrenCategoryQueries($excludedCategories = array(), $onlyVirtual = false, $depth = false)
     {
         $queries = array();
 
         $rootCategory = $this->getCategory();
-        $childrenIds  = explode(',', $rootCategory->getChildren());
-        $childrenIds  = array_diff($childrenIds, $excludedCategories);
-
         $categories = Mage::getResourceModel('smile_virtualcategories/catalog_virtualCategory_collection')
-            ->setStoreId($rootCategory->getStoreId())
+            ->setStore($rootCategory->getStoreId())
             ->addIsActiveFilter()
-            ->addIdFilter($childrenIds)
+            ->addFieldToFilter('path', array('like' => $rootCategory->getPath() . '/%'))
             ->addAttributeToSelect('virtual_category');
 
+        if (!empty($excludedCategories)) {
+            $categories->addFieldToFilter('entity_id', array('nin' => $excludedCategories));
+        }
+
+        if ($depth !== false) {
+            $categories->addFieldToFilter('level', $rootCategory->getLevel() + 1);
+        }
+
         foreach ($categories as $currentCategory) {
-            $virtualRule = $currentCategory->getVirtualRule();
-            $query = $virtualRule->getSearchQuery($excludedCategories);
-            if ($query) {
-                $queries[$currentCategory->getId()] = '(' . $query . ')';
-                $this->addUsedCategoryIds($virtualRule->getUsedCategoryIds());
+            if ($currentCategory->getIsVirtual() || ($onlyVirtual == false)) {
+                $virtualRule = $currentCategory->getVirtualRule();
+                $virtualRule->setStoreId($rootCategory->getStoreId());
+                $query = $virtualRule->getSearchQuery($excludedCategories);
+                if ($query) {
+                    $queries[$currentCategory->getId()] = '(' . $query . ')';
+                    $this->addUsedCategoryIds($virtualRule->getUsedCategoryIds());
+                }
             }
         }
 
         return array_filter($queries);
+    }
+
+    /**
+     * Update the rule current store from the store id.
+     *
+     * @param int $storeId The store id to be set.
+     *
+     * @return Smile_VirtualCategories_Model_Rule Self Reference.
+     */
+    public function setStoreId($storeId)
+    {
+        $this->setData('store', Mage::app()->getStore($storeId));
+        $this->setData('store_id', $storeId);
+        return $this;
+    }
+
+    /**
+     * Update the rule current store from the store.
+     *
+     * @param Mage_Core_Model_Store $store Store to be set.
+     *
+     * @return Smile_VirtualCategories_Model_Rule Self Reference.
+     */
+    public function setStore($store)
+    {
+        $this->setData('store', $store);
+        $this->setData('store_id', $store->getId());
+        return $this;
+    }
+
+    /**
+     * Retrieve rule current store.
+     *
+     * @return Mage_Core_Model_Store
+     */
+    public function getStore()
+    {
+        $store = Mage::app()->getStore();
+        if ($this->getCategory() && $this->getCategory()->getStoreId()) {
+            $storeId = $this->getCategory()->getStoreId();
+            $store = Mage::app()->getStore($storeId);
+        }
+        if ($this->getData('store')) {
+            $store = $this->getData('store');
+        }
+        if ($this->getData('store_id')) {
+            $storeId = $this->getData('store_id');
+            $store = Mage::app()->getStore($storeId);
+        }
+        return $store;
+    }
+
+    /**
+     * Retrieve rule current store id.
+     *
+     * @return int
+     */
+    public function getStoreId()
+    {
+        return $this->getStore()->getId();
     }
 }

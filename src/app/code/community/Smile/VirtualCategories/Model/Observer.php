@@ -54,9 +54,8 @@ class Smile_VirtualCategories_Model_Observer
         $query = $filter->getLayer()->getProductCollection()->getSearchEngineQuery();
 
         // Append the query string for the virtual categories
-        $qs = $category->getVirtualRule()->getSearchQuery();
+        $qs = $this->_getVirtualRule($category)->getSearchQuery();
         $query->addFilter('query', array('query_string' => $qs));
-
         // Mark filter as installed (avoid default filter behavior)
         $filter->setProductCollectionFilterSet(true);
 
@@ -80,13 +79,24 @@ class Smile_VirtualCategories_Model_Observer
         $query = $filter->getLayer()->getProductCollection()->getSearchEngineQuery();
 
         // Prepare facet query group
-        $queries = $category->getVirtualRule()->getChildrenCategoryQueries();
+        $queries = $this->_getVirtualRule($category)->getChildrenCategoryQueries(array(), false, 1);
         $options = array('queries' => $queries, 'prefix' => 'categories_');
         $query->addFacet('categories', 'queryGroup', $options);
-
         $filter->setProductCollectionFacetSet(true);
 
         return $this;
+    }
+
+    /**
+     * Force the virtual rule to be loaded for a category.
+     *
+     * @param Mage_Catalog_Model_Category $category The category.
+     *
+     * @return Smile_VirtualCategories_Model_Rule
+     */
+    protected function _getVirtualRule($category)
+    {
+        return Mage::helper('smile_virtualcategories')->getVirtualRule($category);
     }
 }
 

@@ -20,6 +20,8 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_Histog
     extends Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_Abstract
 {
     /**
+     * Default options.
+     *
      * @var array
      */
     protected $_options = array(
@@ -31,7 +33,7 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_Histog
      *
      * @return array
      */
-    public function getFacetQuery()
+    protected function _getFacetQuery()
     {
         return array('histogram' => $this->_options);
     }
@@ -43,9 +45,13 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_Histog
      *
      * @return array
      */
-    public function getItems($response)
+    public function getItems($response = null)
     {
         $result = array();
+
+        if ($response == null && $this->_response) {
+            $response = $this->_response;
+        }
 
         if (isset($response['entries'])) {
             foreach ($response['entries'] as $value) {

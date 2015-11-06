@@ -109,6 +109,8 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch
     protected $_currentIndexName = null;
 
     /**
+     * Date formats used by the index.
+     *
      * @var array()
      */
     protected $_dateFormats = array();
@@ -221,9 +223,20 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch
      */
     public function saveEntityIndexes($storeId, $indexes, $type = 'product')
     {
-        $docs = $this->_prepareDocs($indexes, $type);
+        $object = new Varien_Object();
+        $eventDatas = array(
+            'type'    => $type,
+            'indexes' => $object->setBulk($indexes),
+            'engine'  => $this,
+        );
+        Mage::dispatchEvent('search_engine_save_entity_index_before', $eventDatas);
+        Mage::dispatchEvent('search_engine_save_'.(string) $type.'_index_before', $eventDatas);
+
+        $docs = $this->_prepareDocs($object->getBulk(), $type);
         $this->getCurrentIndex()->addDocuments($docs);
 
+        Mage::dispatchEvent('search_engine_save_entity_index_after', $eventDatas);
+        Mage::dispatchEvent('search_engine_save_'.(string) $type.'_index_after', $eventDatas);
         return $this;
     }
 
@@ -245,25 +258,7 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch
             $this->_test = false;
         }
 
-        if ($this->_test === false && $this->_getHelper()->isDebugEnabled()) {
-            $this->_getHelper()->showError('Elasticsearch engine is not available');
-        }
-
         return $this->_test;
-    }
-
-    /**
-     * Adds advanced index fields to index data.
-     *
-     * @param array $index      Product data
-     * @param int   $storeId    Store id
-     * @param array $productIds Product ids
-     *
-     * @return array
-     */
-    public function addAdvancedIndex($index, $storeId, $productIds = null)
-    {
-        return Mage::getResourceSingleton('smile_elasticsearch/engine_index')->addAdvancedIndex($index, $storeId, $productIds);
     }
 
     /**
@@ -395,15 +390,15 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch
         }
 
         $docs = array();
-
         foreach ($docsData as $entityId => $index) {
-            $index[self::UNIQUE_KEY] = $entityId . '|' . $index['store_id'];
-            $index['id'] = $entityId;
-            $docs[] = $this->getCurrentIndex()->createDocument($index[self::UNIQUE_KEY], $index, $type);
+            $document = $this->getCurrentIndex()->createDocument($index[self::UNIQUE_KEY], $index, $type);
+            array_push($docs, $document[0]);
+            array_push($docs, $document[1]);
         }
 
         return $docs;
     }
+
 
 
     /**

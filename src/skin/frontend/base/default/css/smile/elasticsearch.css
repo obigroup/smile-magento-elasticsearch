@@ -15,7 +15,7 @@
  
 /* Autocomplete styles */
 #search_autocomplete dl { background: #FFF; border: 1px solid #999; overflow: hidden; width: 100%; }
-#search_autocomplete dl dt { background: #3399cc; color: #FFF; padding: 3px 10px; font-size: 110%; clear: both; margin: 10px 0 0 0}
+#search_autocomplete dl dt { background: #d12c01; color: #FFF; padding: 3px 10px; font-size: 110%; clear: both; margin: 10px 0 0 0}
 #search_autocomplete dl dt:first-of-type { margin: 0}
 #search_autocomplete dl dd { background: #FFF; cursor: pointer; padding: 3px 5px; font-size: 110%; text-overflow: ellipsis; white-space: nowrap; width; 100%; clear:both; }
 #search_autocomplete dl dd.selected { background: #DDD }
@@ -26,6 +26,8 @@
 #search_autocomplete .products-list .product-shop .price-box .price {font-size: 13px; margin: 0px}
 #search_autocomplete .products-list .product-name {font-size: 12px; font-weight: 500; }
 #search_autocomplete .clear {clear: both;}
+#search_autocomplete .autocomplete-attributes a {color: #000; display: block; text-decoration: none;}
+#search_autocomplete .autocomplete-attributes span.attribute-name {color: #666; text-transform: uppercase; font-weight: bold; display: inline-block; float: right}
 
 /* Price slider styles */
 .range-slider { padding: 5px 0 0; }
@@ -46,3 +48,15 @@
 #narrow-by-list .ratings .rating-box { margin: 0; }
 
 .block-layered-nav dl dd ol > li > span, .block-layered-nav dl dd ol > li > a { display: inline-block; }
+
+/* Search facets autocomplete */
+.autocomplete-facet-form input[type=text] {font-size: 80%; height: 18px; width: 100%; margin: 3px 0 10px;}
+.autocomplete-facet-form form {margin: 0 0 10px 0;}
+.autocomplete-facet-form .count.empty { line-height: 10px; color: #AA0000; margin: 0; text-align: center; }
+.empty-query-field-link { float: right; margin: 0px -11px -36px 0; padding: 3px; transform: scale(0.6) rotate(45deg); cursor: pointer; height: 30px; width: 30px; } 
+
+
+.empty-query-field-link div {background: rgb(229,132,115); height: 20px; position: relative; width: 2px; margin: 0 0 0 12px;}
+.empty-query-field-link div:after { background: rgb(229,132,115); content: ""; height: 2px; left: -9px; top: 9px; position: absolute; width: 20px; }
+.block-layered-nav dl dd .ajax-load-link { font-size: 90%; cursor: pointer; padding: 0px; text-decoration: underline; }
+.block-layered-nav dl dd .ajax-load-link-parent {text-align: right; }

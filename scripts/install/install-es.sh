@@ -5,7 +5,7 @@
 #
 
 # Configuration stuffs
-ES_VERSION=1.2
+ES_VERSION=1.5
 ES_PLUGIN_CMD=/usr/share/elasticsearch/bin/plugin
 ES_LOCAL_PLUGIN_DIR=`dirname $0`/../../es/plugins
 
@@ -31,7 +31,12 @@ service elasticsearch restart
 update-rc.d elasticsearch defaults
 
 # Installing plugins required by Magento modules
-$ES_PLUGIN_CMD -r mobz/elasticsearch-head
+$ES_PLUGIN_CMD -r head
 $ES_PLUGIN_CMD -install mobz/elasticsearch-head
-$ES_PLUGIN_CMD -r elasticsearch/elasticsearch-analysis-icu
-$ES_PLUGIN_CMD -install elasticsearch/elasticsearch-analysis-icu/2.2.0
+$ES_PLUGIN_CMD -r kopf
+$ES_PLUGIN_CMD -install lmenezes/elasticsearch-kopf/master
+$ES_PLUGIN_CMD -r analysis-icu
+$ES_PLUGIN_CMD -install elasticsearch/elasticsearch-analysis-icu/2.5.0
+$ES_PLUGIN_CMD -r analysis-phonetic
+$ES_PLUGIN_CMD -install elasticsearch/elasticsearch-analysis-phonetic/2.5.0
+

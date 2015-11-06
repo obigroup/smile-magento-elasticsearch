@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<!-- 
+<!--
 /**
  * Module configuration
  *
@@ -16,12 +16,12 @@
  * @author    Aurelien FOUCRET <aurelien.foucret@smile.fr>
  * @copyright 2013 Smile
  * @license   Apache License Version 2.0
- */ 
+ */
  -->
 <config>
     <modules>
         <Smile_ElasticSearch>
-            <version>1.1.2</version>
+            <version>1.1.7</version>
         </Smile_ElasticSearch>
     </modules>
     <global>
@@ -179,6 +179,15 @@
                 </smile_elasticsearch>
             </updates>
         </layout>
+        <translate>
+            <modules>
+                <Smile_ElasticSearch>
+                    <files>
+                        <default>Smile_ElasticSearch.csv</default>
+                    </files>
+                </Smile_ElasticSearch>
+            </modules>
+        </translate>
         <events>
             <controller_action_predispatch_catalog_category_view>
                 <observers>
@@ -226,85 +235,75 @@
                 <elasticsearch_indices_pattern>{{YYYYMMdd}}-{{HHmmss}}</elasticsearch_indices_pattern>
                 <elasticsearch_number_of_shards>1</elasticsearch_number_of_shards>
                 <elasticsearch_number_of_replicas>0</elasticsearch_number_of_replicas>
-                <elasticsearch_facets_max_size>50</elasticsearch_facets_max_size>
                 <elasticsearch_enable_options_search>1</elasticsearch_enable_options_search>
                 <elasticsearch_enable_icu_folding>0</elasticsearch_enable_icu_folding>
                 <elasticsearch_min_category_filter_level>2</elasticsearch_min_category_filter_level>
+                <elasticsearch_batch_indexing_size>100</elasticsearch_batch_indexing_size>
                 <elasticsearch_analysis_index_settings>
                     <analyzer>
                         <whitespace>
-                            <tokenizer>standard</tokenizer>
-                            <filter>ascii_folding,lowercase,trim</filter>
+                            <tokenizer>whitespace</tokenizer>
+                            <filter>word_delimiter,lowercase,ascii_folding,trim,synonym</filter>
                             <char_filter>html_strip</char_filter>
                         </whitespace>
                         <edge_ngram_front>
-                            <tokenizer>standard</tokenizer>
-                            <filter>length,ascii_folding,lowercase,trim,edge_ngram_front</filter>
+                            <tokenizer>whitespace</tokenizer>
+                            <filter>word_delimiter,ascii_folding,lowercase,trim,edge_ngram_front</filter>
                             <char_filter>html_strip</char_filter>
                         </edge_ngram_front>
-                        <edge_ngram_back>
-                            <tokenizer>standard</tokenizer>
-                            <filter>length,ascii_folding,lowercase,trim,edge_ngram_back</filter>
-                            <char_filter>html_strip</char_filter>
-                        </edge_ngram_back>
-                        <edge_ngram_front_strip_apos_and_ws>
-                            <tokenizer>standard</tokenizer>
-                            <filter>shingle,length,edge_ngram_front,strip_apostrophes,strip_whitespaces,ascii_folding,lowercase,trim</filter>
-                            <char_filter>html_strip</char_filter>
-                        </edge_ngram_front_strip_apos_and_ws>
-                        <shingle>
-                            <tokenizer>standard</tokenizer>
-                            <filter>shingle,length,ascii_folding,lowercase,trim</filter>
-                            <char_filter>html_strip</char_filter>
-                        </shingle>
-                        <shingle_strip_apos_and_ws>
-                            <tokenizer>standard</tokenizer>
-                            <filter>shingle,strip_apostrophes,strip_whitespaces,length,ascii_folding,lowercase,trim</filter>
-                            <char_filter>html_strip</char_filter>
-                        </shingle_strip_apos_and_ws>
                         <sortable>
                             <tokenizer>keyword</tokenizer>
-                            <filter>ascii_folding,lowercase,trim</filter>
+                            <filter>lowercase,ascii_folding,trim</filter>
                             <char_filter>html_strip</char_filter>
                         </sortable>
                     </analyzer>
                     <filter>
-                        <shingle>
-                            <type>shingle</type>
-                            <min_shingle_size>2</min_shingle_size>
-                            <max_shingle_size>10</max_shingle_size>
-                        </shingle>
+                        <trim>
+                            <type>trim</type>
+                        </trim>
+                        <lowercase>
+                            <type>lowercase</type>
+                        </lowercase>
                         <strip_whitespaces>
                             <type>pattern_replace</type>
                             <pattern>\s</pattern>
                             <replacement></replacement>
                         </strip_whitespaces>
-                        <strip_apostrophes>
-                            <type>pattern_replace</type>
-                            <pattern>'</pattern>
-                            <replacement></replacement>
-                        </strip_apostrophes>
                         <edge_ngram_front>
                             <type>edgeNGram</type>
                             <min_gram>1</min_gram>
-                            <max_gram>20</max_gram>
+                            <max_gram>32</max_gram>
                             <side>front</side>
                         </edge_ngram_front>
-                        <edge_ngram_back>
-                            <type>edgeNGram</type>
-                            <min_gram>4</min_gram>
-                            <max_gram>20</max_gram>
-                            <side>back</side>
-                        </edge_ngram_back>
                         <length>
                             <type>length</type>
-                            <min>2</min>
+                            <min>1</min>
                         </length>
                         <ascii_folding>
                             <type>asciifolding</type>
-                            <preserve_original>2</preserve_original>
+                            <preserve_original>0</preserve_original>
                         </ascii_folding>
+                        <elision_fr>
+                            <type>elision</type>
+                            <articles>l,d,m,t,qu,n,s,j</articles>
+                        </elision_fr>
+                        <word_delimiter>
+                            <type>word_delimiter</type>
+                            <generate_word_parts>0</generate_word_parts>
+                            <generate_number_parts>1</generate_number_parts>
+                            <catenate_words>1</catenate_words>
+                            <catenate_numbers>1</catenate_numbers>
+                            <catenate_all>1</catenate_all>
+                            <split_on_case_change>1</split_on_case_change>
+                            <preserve_original>1</preserve_original>
+                        </word_delimiter>
                     </filter>
+                    <language_filters>
+                        <french>elision_fr</french>
+                    </language_filters>
+                    <language_stemmers>
+                        <french>light_french</french>
+                    </language_stemmers>
                 </elasticsearch_analysis_index_settings>
             </search>
         </catalog>
@@ -313,9 +312,22 @@
                 <search_in_category_name>1</search_in_category_name>
                 <search_in_category_name_weight>1</search_in_category_name_weight>
                 <search_in_category_name_enable_fuzzy>1</search_in_category_name_enable_fuzzy>
-                <search_in_category_name_fuzziness>0.75</search_in_category_name_fuzziness>
-                <search_in_category_name_prefix_length>2</search_in_category_name_prefix_length>
-                <search_in_category_name_use_in_autocomplete>1</search_in_category_name_use_in_autocomplete>
+                <enable_fuzziness>1</enable_fuzziness>
+                <fuzziness_value>0.75</fuzziness_value>
+                <fuzziness_prefix_length>1</fuzziness_prefix_length>
+                <fuzziness_max_expansions>10</fuzziness_max_expansions>
+                <enable_phonetic_search>1</enable_phonetic_search>
+                <enable_phrase_match>1</enable_phrase_match>
+                <phrase_match_boost_value>10</phrase_match_boost_value>
+                <enable_phonetic_search_fuzziness>1</enable_phonetic_search_fuzziness>
+                <phonetic_search_fuzziness_value>0.5</phonetic_search_fuzziness_value>
+                <phonetic_search_fuzziness_prefix_length>1</phonetic_search_fuzziness_prefix_length>
+                <phonetic_search_fuzziness_max_expansions>2</phonetic_search_fuzziness_max_expansions>
+                <autocomplete_enable_fuzziness>1</autocomplete_enable_fuzziness>
+                <autocomplete_fuzziness_value>0.25</autocomplete_fuzziness_value>
+                <autocomplete_fuzziness_prefix_length>1</autocomplete_fuzziness_prefix_length>
+                <autocomplete_fuzziness_max_expansions>10</autocomplete_fuzziness_max_expansions>
+                <search_minimum_should_match><![CDATA[2<75% 6<50%]]></search_minimum_should_match>
             </fulltext_relevancy>
             <popular_terms_autocomplete>
                 <max_size>3</max_size>
@@ -323,6 +335,9 @@
             <product_autocomplete>
                 <max_size>3</max_size>
             </product_autocomplete>
+            <attribute_autocomplete>
+                <max_size>3</max_size>
+            </attribute_autocomplete>
             <category_autocomplete>
                 <max_size>3</max_size>
             </category_autocomplete>

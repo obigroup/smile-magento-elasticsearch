@@ -21,11 +21,15 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Product
 {
 
     /**
+     * Model used to read attributes configuration.
+     *
      * @var string
      */
     protected $_attributeCollectionModel = 'catalog/product_attribute_collection';
 
     /**
+     * List of backends authorized for indexing.
+     *
      * @var array
      */
     protected $_authorizedBackendModels = array(
@@ -42,6 +46,8 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Product
     );
 
     /**
+     * Product entity type code.
+     *
      * @var string
      */
     protected $_entityType = 'catalog_product';
@@ -54,19 +60,39 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Product
     protected function _getMappingProperties()
     {
         $mapping = parent::_getMappingProperties(true);
-        $mapping['properties']['categories'] = array('type' => 'long');
-        $mapping['properties']['in_stock']   = array('type' => 'integer');
+        $mapping['properties']['categories'] = array('type' => 'long', 'fielddata' => array('format' => 'doc_values'));
+        $mapping['properties']['show_in_categories'] = array('type' => 'long', 'fielddata' => array('format' => 'doc_values'));
+        $mapping['properties']['in_stock']   = array('type' => 'boolean', 'fielddata' => array('format' => 'doc_values'));
 
-        foreach (Mage::app()->getStores() as $store) {
+        foreach ($this->_stores as $store) {
             $languageCode = Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($store);
-            $fieldMapping = $this->_getStringMapping('category_name_' . $languageCode, $languageCode, 'varchar', false);
+            $fieldMapping = $this->_getStringMapping('category_name_' . $languageCode, $languageCode, 'string', true, true, true);
+            $mapping['properties'] = array_merge($mapping['properties'], $fieldMapping);
         }
 
-        // Append dynamic mapping for product category position field
-        $fieldTemplate = array('match' => 'position_category_*', 'mapping' => array('type' => 'integer'));
-        $mapping['dynamic_templates'][] = array('category_position' => $fieldTemplate);
+        $mapping['properties']['category_position'] = array(
+            'type' => 'nested',
+            'properties' => array(
+                'category_id' => array('type' => 'long', 'fielddata' => array('format' => 'doc_values')),
+                'position'    => array('type' => 'long', 'fielddata' => array('format' => 'doc_values'))
+            )
+        );
 
-        return $mapping;
+        // Append dynamic mapping for product prices and discount fields
+        $fieldTemplate = array(
+            'match' => 'price_*', 'mapping' => array('type' => 'double', 'fielddata' => array('format' => 'doc_values'))
+        );
+        $mapping['dynamic_templates'][] = array('prices' => $fieldTemplate);
+
+        $fieldTemplate = array(
+            'match' => 'has_discount_*', 'mapping' => array('type' => 'boolean', 'fielddata' => array('format' => 'doc_values'))
+        );
+        $mapping['dynamic_templates'][] = array('has_discount' => $fieldTemplate);
+
+        $mappingObject = new Varien_Object($mapping);
+        Mage::dispatchEvent('search_engine_product_mapping_properties', array('mapping' => $mappingObject));
+
+        return $mappingObject->getData();
     }
 
     /**
@@ -75,12 +101,13 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Product
      * @param int         $storeId Store id
      * @param string|null $ids     Ids filter
      * @param int         $lastId  First id
-     * @param int         $limit   Size of the bucket
      *
      * @return array
      */
-    protected function _getSearchableEntities($storeId, $ids = null, $lastId = 0, $limit = 100)
+    protected function _getSearchableEntities($storeId, $ids = null, $lastId = 0)
     {
+        $limit = $this->_getBatchIndexingSize();
+
         $websiteId = Mage::app()->getStore($storeId)->getWebsiteId();
         $adapter   = $this->getConnection();
 
@@ -117,47 +144,73 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Product
         /**
          * Add additional external limitation
         */
-        $eventName = sprintf('prepare_catalog_%s_index_select', $this->_type);
-        Mage::dispatchEvent(
-            $eventName,
-            array(
-                'select'        => $select,
-                'entity_field'  => new Zend_Db_Expr('e.entity_id'),
-                'website_field' => new Zend_Db_Expr('website.website_id'),
-                'store_field'   => $storeId
-            )
+        $eventNames = array(
+            sprintf('prepare_catalog_%s_index_select', $this->_type),
+            sprintf('prepare_catalog_search_%s_index_select', $this->_type),
         );
+        foreach ($eventNames as $eventName) {
+            Mage::dispatchEvent(
+                $eventName,
+                array(
+                    'select'        => $select,
+                    'entity_field'  => new Zend_Db_Expr('e.entity_id'),
+                    'website_field' => new Zend_Db_Expr('website.website_id'),
+                    'store_field'   => $storeId
+                )
+            );
+        }
 
-        $result = $adapter->fetchAll($select);
+        $result = array();
+        $values = $adapter->fetchAll($select);
+        foreach ($values as $value) {
+            $result[$value['entity_id']] = $value;
+        }
 
-        return $result;
+        return array_map(array($this, '_fixBaseFieldTypes'), $result);
     }
 
     /**
-     * Save docs to the index
+     * Cast all base fields to their correct type.
      *
-     * @param int   $storeId       Store id
-     * @param array $entityIndexes Doc values.
+     * @param array $entityData Data for the current product
      *
-     * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Catalog_Eav_Abstract
+     * @return array
      */
-    protected function _saveIndexes($storeId, $entityIndexes)
+    protected function _fixBaseFieldTypes($entityData)
+    {
+        $entityData['entity_id'] = (int) $entityData['entity_id'];
+        $entityData['entity_type_id'] = (int) $entityData['entity_type_id'];
+        $entityData['attribute_set_id'] = (int) $entityData['attribute_set_id'];
+        $entityData['has_options'] = (bool) $entityData['has_options'];
+        $entityData['required_options'] = (bool) $entityData['required_options'];
+        $entityData['in_stock'] = (bool) $entityData['in_stock'];
+        return $entityData;
+    }
+
+    /**
+     * Append additional data to the index
+     *
+     * @param array $entityIndexes Indexed data
+     * @param int   $storeId       Store id
+     *
+     * @return array
+     */
+    protected function _addAdvancedIndex($entityIndexes, $storeId)
     {
         $index = Mage::getResourceSingleton('smile_elasticsearch/engine_index');
         $entityIndexes = $index->addAdvancedIndex($entityIndexes, $storeId);
         $store = Mage::app()->getStore($storeId);
         $languageCode = Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($store);
 
-        foreach ($entityIndexes as &$entityIndex) {
-            if (isset($entityIndex['category_name'])) {
-                $entityIndex['category_name_' . $languageCode] = $entityIndex['category_name'];
-                unset($entityIndex['category_name']);
+        foreach ($entityIndexes as &$entityData) {
+            if (isset($entityData['category_name'])) {
+                $entityData['category_name_' . $languageCode] = $entityData['category_name'];
+                unset($entityData['category_name']);
             }
         }
 
-        return parent::_saveIndexes($storeId, $entityIndexes);
+        return $entityIndexes;
     }
-
 
     /**
      * Retrieve entities children ids (simple products for configurable, grouped and bundles).
@@ -204,9 +257,6 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Product
                 foreach ($data as $link) {
                     $parentId = $link[$relation->getParentFieldName()];
                     $childId  = $link[$relation->getChildFieldName()];
-                    if (!isset($children[$parentId])) {
-                        $children[$parentId] = array();
-                    }
                     $children[$parentId][] = $childId;
                 }
             }
@@ -216,27 +266,89 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Product
     }
 
     /**
+     * Append children attributes to parents doc.
+     *
+     * @param int    $parentId          Entity id
+     * @param array  &$entityAttributes Attributes values by entity id
+     * @param array  $entityRelations   Array of the entities relations
+     * @param int    $storeId           Store id
+     * @param string $entityTypeId      Type of the parent entity
+     *
+     * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Mapping_Catalog_Eav_Abstract
+     */
+    protected function _addChildrenData($parentId, &$entityAttributes, $entityRelations, $storeId, $entityTypeId = null)
+    {
+        $forbiddenAttributesCode = array('visibility', 'status', 'price', 'tax_class_id');
+        $attributesById = $this->_getAttributesById();
+        $entityData = $entityAttributes[$parentId];
+        if (isset($entityRelations[$parentId])) {
+            foreach ($entityRelations[$parentId] as $childrenId) {
+                if (isset($entityAttributes[$childrenId])) {
+                    foreach ($entityAttributes[$childrenId] as $attributeId => $value) {
+                        $attribute = $attributesById[$attributeId];
+                        $attributeCode = $attribute->getAttributeCode();
+                        $isAttributeIndexed = !in_array($attributeCode, $forbiddenAttributesCode);
+
+                        if ($entityTypeId == Mage_Catalog_Model_Product_Type_Configurable::TYPE_CODE) {
+                            $frontendInput = $isAttributeIndexed ? $attribute->getFrontendInput() : false;
+                            $isAttributeIndexed = $isAttributeIndexed && in_array($frontendInput, array('select', 'multiselect'));
+                            $isAttributeIndexed = $isAttributeIndexed && (bool) $attribute->getIsConfigurable();
+                        } else {
+                            $isAttributeIndexed = $isAttributeIndexed && $attribute->getBackendType() != 'static';
+                        }
+
+                        if ($isAttributeIndexed && $value != null) {
+                            if (!isset($entityAttributes[$parentId][$attributeId])) {
+                                $entityAttributes[$parentId][$attributeId] =  $value;
+                            } else {
+                                if (!is_array($entityAttributes[$parentId][$attributeId])) {
+                                    $entityAttributes[$parentId][$attributeId] = explode(
+                                        ',', $entityAttributes[$parentId][$attributeId]
+                                    );
+                                }
+                                if (is_array($value)) {
+                                    $entityAttributes[$parentId][$attributeId] = array_merge(
+                                        $value, $entityAttributes[$parentId][$attributeId]
+                                    );
+                                } else {
+                                    $entityAttributes[$parentId][$attributeId][] = $value;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        return $this;
+    }
+
+    /**
      * Return a list of all searchable field for the current type (by locale code).
      *
-     * @param string $localeCode Locale code
+     * @param string $languageCode Language code.
+     * @param string $searchType   Type of search currentlty used.
+     * @param string $analyzer     Allow to force the analyzer used for the field (whitesapce, ...).
      *
      * @return array.
      */
-    public function getSearchFields($localeCode)
+    public function getSearchFields($languageCode, $searchType = null, $analyzer = null)
     {
-        $searchFields = parent::getSearchFields($localeCode);
+        $searchFields = parent::getSearchFields($languageCode, $searchType, $analyzer);
         $advancedSettingsPathPrefix = 'elasticsearch_advanced_search_settings/fulltext_relevancy/';
-        $searchInCategoryName = (bool) Mage::getStoreConfig($advancedSettingsPathPrefix . 'search_in_category_name');
-        if ($searchInCategoryName) {
-            $enableFuzzySearch = (bool) Mage::getStoreConfig($advancedSettingsPathPrefix . 'search_in_category_name_enable_fuzzy');
-            $fuzziness = $enableFuzzySearch ? Mage::getStoreConfig($advancedSettingsPathPrefix . 'search_in_category_name_fuzziness') : false;
-            $prefixLength = Mage::getStoreConfig($advancedSettingsPathPrefix . 'search_in_category_name_prefix_length');
-            $usedInAutocomplete = (bool) Mage::getStoreConfig($advancedSettingsPathPrefix . 'search_in_category_name_use_in_autocomplete');
-            $searchFields['category_name_' . $localeCode] = array(
-                'weight'               => Mage::getStoreConfig($advancedSettingsPathPrefix . 'search_in_category_name_weight'),
-                'fuzziness'            => $fuzziness,
-                'prefix_length'        => $prefixLength,
-                'used_in_autocomplete' => true
+        $searchInCategorySettingsPathPrefix = $advancedSettingsPathPrefix . 'search_in_category_name_';
+        $isSearchable = (bool) Mage::getStoreConfig($advancedSettingsPathPrefix . 'search_in_category_name');
+        if (in_array($searchType, array(self::SEARCH_TYPE_FUZZY, self::SEARCH_TYPE_PHONETIC))) {
+            $isSearchable = $isSearchable && (bool) Mage::getStoreConfig($searchInCategorySettingsPathPrefix . 'fuzzy');
+        } else if ($searchType == self::SEARCH_TYPE_AUTOCOMPLETE) {
+            $isSearchable = $isSearchable && (bool) Mage::getStoreConfig($searchInCategorySettingsPathPrefix . 'use_in_autocomplete');
+        }
+
+        if ($isSearchable) {
+            $weight = (int) Mage::getStoreConfig($searchInCategorySettingsPathPrefix . 'weight');
+            $analyzer = $this->_getDefaultAnalyzerBySearchType($languageCode, $searchType);
+            $searchFields[] = sprintf(
+                "%s^%s", $this->getFieldName('category_name', $languageCode, self::FIELD_TYPE_SEARCH, $analyzer), $weight
             );
         }
         return $searchFields;

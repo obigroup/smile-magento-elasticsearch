@@ -32,25 +32,55 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
     /**
      * @var string
      */
+    const FULL_REINDEX_REFRESH_INTERVAL = '10s';
+
+    /**
+     * @var string
+     */
+    const DIFF_REINDEX_REFRESH_INTERVAL = '1s';
+
+    /**
+     * @var string
+     */
+    const FULL_REINDEX_MERGE_FACTOR = '20';
+
+    /**
+     * @var string
+     */
+    const DIFF_REINDEX_MERGE_FACTOR = '3';
+
+    /**
+     * Index name.
+     *
+     * @var string
+     */
     protected $_name;
 
     /**
+     * Types mappings.
+     *
      * @var array
      */
     protected $_mappings = array();
 
     /**
+     * Does the index needs to be installed or not.
+     *
      * @var boolean
      */
     protected $_indexNeedInstall = false;
 
     /**
+     * Date format used by the index.
+     *
      * @var string
      */
     protected $_dateFormat = 'date';
 
     /**
-     * @var array Stop languages for token filter.
+     * Stop languages for token filter.
+     *
+     * @var array
      * @link http://www.elasticsearch.org/guide/reference/index-modules/analysis/stop-tokenfilter.html
      */
     protected $_stopLanguages = array(
@@ -61,13 +91,24 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
     );
 
     /**
-     * @var array Snowball languages.
+     * Snowball languages.
+     *
+     * @var array
      * @link http://www.elasticsearch.org/guide/reference/index-modules/analysis/snowball-tokenfilter.html
     */
     protected $_snowballLanguages = array(
-        'Armenian', 'Basque', 'Catalan', 'Danish', 'Dutch', 'English', 'Finnish', 'French',
-        'German', 'Hungarian', 'Italian', 'Kp', 'Lovins', 'Norwegian', 'Porter', 'Portuguese',
-        'Romanian', 'Russian', 'Spanish', 'Swedish', 'Turkish',
+        'armenian', 'basque', 'catalan', 'danish', 'dutch', 'english', 'finnish', 'french',
+        'german', 'hungarian', 'italian', 'kp', 'lovins', 'norwegian', 'porter', 'portuguese',
+        'romanian', 'russian', 'spanish', 'swedish', 'turkish',
+    );
+
+    /**
+     * Beider-Morse algorithm supported languages (can be used for phonetic matching)
+     *
+     * @var array
+     */
+    protected $_beiderMorseLanguages = array(
+        'english', 'french', 'german', 'hungarian', 'italian', 'romanian', 'russian', 'spanish', 'turkish'
     );
 
     /**
@@ -121,6 +162,20 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
         return $this;
     }
 
+    /**
+     * Optimizes index
+     *
+     * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index Self reference
+     */
+    public function optimize()
+    {
+        $indices = $this->getClient()->indices();
+        $params  = array('index' => $this->getCurrentName());
+        if ($indices->exists($params)) {
+            $indices->optimize($params);
+        }
+        return $this;
+    }
 
     /**
      * Return index settings.
@@ -129,12 +184,34 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
      */
     protected function _getSettings()
     {
-        $indexSettings = array();
-        $indexSettings['number_of_replicas'] = (int) $this->getConfig('number_of_replicas');
+        $indexSettings = array(
+            'number_of_replicas'               => (int) $this->getConfig('number_of_replicas'),
+            "refresh_interval"                 => self::FULL_REINDEX_REFRESH_INTERVAL,
+            "merge.policy.merge_factor"        => self::FULL_REINDEX_MERGE_FACTOR,
+            "merge.scheduler.max_thread_count" => 1
+        );
 
         $indexSettings['analysis'] = $this->getConfig('analysis_index_settings');
+        $synonyms = Mage::getResourceModel('smile_elasticsearch/catalogSearch_synonym_collection')->exportSynonymList();
+
+        if (!empty($synonyms)) {
+            $indexSettings['analysis']['filter']['synonym'] = array(
+                'type'     => 'synonym',
+                'synonyms' => $synonyms
+            );
+        }
+
+        $availableFilters = array_keys($indexSettings['analysis']['filter']);
+
+        foreach ($indexSettings['analysis']['filter'] as &$filter) {
+            if ($filter['type'] == 'elision') {
+                $filter['articles'] = explode(',', $filter['articles']);
+            }
+        }
+
         foreach ($indexSettings['analysis']['analyzer'] as &$analyzer) {
             $analyzer['filter'] = isset($analyzer['filter']) ? explode(',', $analyzer['filter']) : array();
+            $analyzer['filter'] = array_values(array_intersect($availableFilters, $analyzer['filter']));
             $analyzer['char_filter'] = isset($analyzer['char_filter']) ? explode(',', $analyzer['char_filter']) : array();
         }
 
@@ -143,29 +220,83 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
         foreach (Mage::app()->getStores() as $store) {
             /** @var $store Mage_Core_Model_Store */
             $languageCode = $helper->getLanguageCodeByStore($store);
-            $lang = Zend_Locale_Data::getContent('en', 'language', $languageCode);
-
-            $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode] = array(
-                'type' => 'custom',
-                'tokenizer' => 'standard',
-                'filter' => array('length', 'lowercase'),
-                'char_filter' => array('html_strip')
-            );
-
-            if (in_array($lang, $this->_snowballLanguages)) {
-                $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode]['filter'][] = 'snowball_' . $languageCode;
-                $indexSettings['analysis']['filter']['snowball_' . $languageCode] = array(
-                    'type' => 'snowball',
-                    'language' => $lang,
-                );
-            }
+            $indexSettings = $this->_addLanguageAnalyzerToSettings($indexSettings, $languageCode, $availableFilters);
         }
 
         if ($this->isIcuFoldingEnabled()) {
             foreach ($indexSettings['analysis']['analyzer'] as &$analyzer) {
                 array_unshift($analyzer['filter'], 'icu_folding');
+                array_unshift($analyzer['filter'], 'icu_normalizer');
             }
             unset($analyzer);
+        }
+
+        return $indexSettings;
+    }
+
+    /**
+     * Append analyzers for a given language.
+     *
+     * @param array  $indexSettings    Index settings.
+     * @param string $languageCode     New language code.
+     * @param array  $availableFilters List of available filters.
+     *
+     * @return array
+     */
+    protected function _addLanguageAnalyzerToSettings($indexSettings, $languageCode, $availableFilters)
+    {
+        $lang = strtolower(Zend_Locale_Data::getContent('en', 'language', $languageCode));
+
+        $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode] = array(
+            'type' => 'custom',
+            'tokenizer' => 'whitespace',
+            'filter' => array( 'word_delimiter', 'length', 'lowercase', 'asciifolding', 'synonym'),
+            'char_filter' => array('html_strip')
+        );
+
+        if (isset($indexSettings['analysis']['language_filters'][$lang])) {
+            $additionalFilters = explode(',', $indexSettings['analysis']['language_filters'][$lang]);
+            $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode]['filter'] = array_merge(
+                $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode]['filter'],
+                $additionalFilters
+            );
+        }
+
+        $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode]['filter'] = array_values(
+            array_intersect(
+                $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode]['filter'],
+                $availableFilters
+            )
+        );
+
+        if (in_array($lang, $this->_snowballLanguages)) {
+            if (in_array($lang, $this->_stopLanguages)) {
+                $indexSettings['analysis']['filter']['stop_' . $languageCode] = array(
+                    'type' => 'stop', 'stopwords' => '_' . $lang . '_'
+                );
+                $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode]['filter'][] = 'stop_' . $languageCode;
+            }
+
+            $languageStemmer = $lang;
+            if (isset($indexSettings['analysis']['language_stemmers'][$lang])) {
+                $languageStemmer = $indexSettings['analysis']['language_stemmers'][$lang];
+            }
+            $indexSettings['analysis']['filter']['snowball_' . $languageCode] = array(
+                'type' => 'stemmer', 'language' => $languageStemmer
+            );
+            $indexSettings['analysis']['analyzer']['analyzer_' . $languageCode]['filter'][] = 'snowball_' . $languageCode;
+        }
+
+        if (in_array($lang, $this->_beiderMorseLanguages)) {
+            $indexSettings['analysis']['filter']['beidermorse_' . $languageCode] = array(
+                'type' => 'phonetic', 'encoder' => 'beider_morse', 'languageset' => $lang
+            );
+            $indexSettings['analysis']['analyzer']['phonetic_' . $languageCode] = array(
+                'type' => 'custom', 'tokenizer' => 'standard', 'char_filter' => 'html_strip',
+                'filter' => array(
+                    "standard", "ascii_folding", "lowercase", "stemmer", "beidermorse_" . $languageCode
+                )
+            );
         }
 
         return $indexSettings;
@@ -199,7 +330,7 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
      * @link http://www.elasticsearch.org/guide/reference/mapping/core-types.html
      * @link http://www.elasticsearch.org/guide/reference/mapping/multi-field-type.html
      *
-     * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Adapter
+     * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
      *
      * @throws Exception
      */
@@ -215,7 +346,7 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
                 $indices->close($params);
 
                 $settingsParams = $params;
-                $settingsParams['body']['settings'] = $this->_getSettings();
+                $settingsParams['body']['settings'] = $indexSettings;
                 $indices->putSettings($settingsParams);
 
                 $mapping = $params;
@@ -227,7 +358,7 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
 
                 $indices->open();
             } else {
-                $params['body']['settings'] = $this->_getSettings();
+                $params['body']['settings'] = $indexSettings;
                 $params['body']['settings']['number_of_shards'] = (int) $this->getConfig('number_of_shards');
                 foreach ($this->_mappings as $type => $mappingModel) {
                     $mappingModel->setType($type);
@@ -241,6 +372,44 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
             Mage::logException($e);
             Mage::getSingleton('adminhtml/session')->addError($e->getMessage());
             throw $e;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Indicates if the phonetic machine is enabled for the current locale
+     *
+     * @param string $languageCode Language code.
+     *
+     * @return boolean
+     */
+    public function isPhoneticSupported($languageCode)
+    {
+        $lang = strtolower(Zend_Locale_Data::getContent('en', 'language', $languageCode));
+        return in_array($lang, $this->_beiderMorseLanguages);
+    }
+
+    /**
+     * Update index settings to refresh the synomyms list.
+     *
+     * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Adapter
+     */
+    public function updateSynonyms()
+    {
+        $synonyms = Mage::getResourceModel('smile_elasticsearch/catalogSearch_synonym_collection')->exportSynonymList();
+        $indices = $this->getClient()->indices();
+        $params = array('index' => $this->getCurrentName());
+
+        if ($indices->exists($params) && !empty($synonyms)) {
+            $updateSettings = $params;
+            $updateSettings['body']['analysis']['filter']['synonym'] = array(
+                'type'     => 'synonym',
+                'synonyms' => $synonyms
+            );
+            $indices->close($params);
+            $indices->putSettings($updateSettings);
+            $indices->open($params);
         }
 
         return $this;
@@ -265,29 +434,14 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
      */
     public function prepareNewIndex()
     {
-        // Current date use to compute the index name
-        $currentDate = new Zend_Date();
+        $helper = $config = $this->_getHelper();
+        $config = $helper->getEngineConfigData();
 
-        // Default pattern if nothing set into the config
-        $pattern = '{{YYYYMMdd}}-{{HHmmss}}';
-
-        // Try to get the pattern from config
-        $config = $this->_getHelper()->getEngineConfigData();
+        // Compute index name
+        $indexName = $helper->getHorodatedName($config['alias']);
         if (isset($config['indices_pattern'])) {
-            $pattern = $config['indices_pattern'];
+            $indexName = $helper->getHorodatedName($config['alias'], $config['indices_pattern']);
         }
-
-        // Parse pattern to extract datetime tokens
-        $matches = array();
-        preg_match_all('/{{([\w]*)}}/', $pattern, $matches);
-
-        foreach (array_combine($matches[0], $matches[1]) as $k => $v) {
-            // Replace tokens (UTC date used)
-            $pattern = str_replace($k, $currentDate->toString($v), $pattern);
-        }
-
-        $indexName = $config['alias'] . '-' . $pattern;
-
         // Set the new index name
         $this->setCurrentName($indexName);
 
@@ -301,24 +455,76 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
     /**
      * Install the new index after full reindex
      *
+     * @param string $indexName Index to be installed current index if not set.
+     *
      * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Adapter
      */
-    public function installNewIndex()
+    public function installNewIndex($indexName = null)
     {
-        if ($this->_indexNeedInstall) {
+        if ($indexName !== null && $indexName != $this->getCurrentName()) {
+            $this->setCurrentName($indexName);
+            $this->_indexNeedInstall = true;
+        }
 
+        if ($this->_indexNeedInstall) {
+            $this->optimize();
             Mage::dispatchEvent('smile_elasticsearch_index_install_before', array('index_name' => $this->getCurrentName()));
 
             $indices = $this->getClient()->indices();
             $alias = $this->getConfig('alias');
-            $indices->putAlias(array('index' => $this->getCurrentName(), 'name' => $alias));
-            $allIndices = $indices->getMapping(array('index'=> $alias));
+            $indices->putSettings(
+                array(
+                    'index' => $this->getCurrentName(),
+                    'body'  => array(
+                        "refresh_interval"          => self::DIFF_REINDEX_REFRESH_INTERVAL,
+                        "merge.policy.merge_factor" => self::DIFF_REINDEX_MERGE_FACTOR,
+                    )
+                )
+            );
+
+            $deletedIndices = array();
+            $aliasActions = array();
+            $aliasActions[] = array('add' => array('index' => $this->getCurrentName(), 'alias' => $alias));
+            try {
+                $allIndices = $indices->getMapping(array('index'=> $alias));
+            } catch (\Elasticsearch\Common\Exceptions\Missing404Exception $e) {
+                $allIndices = array();
+            }
             foreach (array_keys($allIndices) as $index) {
                 if ($index != $this->getCurrentName()) {
-                    $indices->delete(array('index' => $index));
+                    $deletedIndices[] = $index;
+                    $aliasActions[] = array('remove' => array('index' => $index, 'alias' => $alias));
                 }
             }
+
+            $indices->updateAliases(array('body' => array('actions' => $aliasActions)));
+
+            foreach ($deletedIndices as $index) {
+                Mage::dispatchEvent('smile_elasticsearch_index_delete_before', array('index_name' => $index));
+                $indices->delete(array('index' => $index));
+            }
         }
+    }
+
+    /**
+     * Load a mapping from ES.
+     *
+     * @param string $type The type of document we want the mapping for.
+     *
+     * @return array|null
+     */
+    public function loadMappingPropertiesFromIndex($type)
+    {
+        $result = null;
+        $params = array('index'=> $this->getCurrentName());
+        if ($this->getClient()->indices()->exists($params)) {
+            $params['type'] = $type;
+            $mappings = $this->getClient()->indices()->getMapping($params);
+            if (isset($mappings[$this->getCurrentName()]['mappings'][$type])) {
+                $result = $mappings[$this->getCurrentName()]['mappings'][$type];
+            }
+        }
+        return $result;
     }
 
     /**
@@ -342,11 +548,11 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
             $headerData['_parent'] = $data['_parent'];
         }
 
-        $headerRow = json_encode(array('index' => $headerData));
-        $dataRow = json_encode($data);
+        $headerRow = array('index' => $headerData);
+        $dataRow = $data;
 
         $result = array($headerRow, $dataRow);
-        return implode("\n", $result);
+        return $result;
     }
 
     /**
@@ -362,15 +568,12 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
     {
         try {
             if (!empty($docs)) {
-                $docs[] = '';
-                $bulkParams = array('body' => implode("\n", $docs));
+                $bulkParams = array('body' => $docs);
                 $ret = $this->getClient()->bulk($bulkParams);
             }
         } catch (Exception $e) {
             throw($e);
         }
-
-        $this->refresh();
 
         return $this;
     }
@@ -404,7 +607,10 @@ class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Index
                     $data = $this->getClient()->scroll($scroller);
 
                     foreach ($data['hits']['hits'] as $item) {
-                        $docs[] = $this->createDocument($item['_id'], $item['_source'], 'stats');
+                        $docs = array_merge(
+                            $docs,
+                            $this->createDocument($item['_id'], $item['_source'], 'stats')
+                        );
                     }
 
                     $this->addDocuments($docs);

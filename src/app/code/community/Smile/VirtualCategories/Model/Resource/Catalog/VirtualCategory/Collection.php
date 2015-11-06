@@ -85,11 +85,8 @@ class Smile_VirtualCategories_Model_Resource_Catalog_VirtualCategory_Collection 
 
         if ($engine instanceof Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch) {
             $query = $engine->createQuery('product');
+            $query->addFilter('terms', array('store_id' => $this->getProductStoreId()));
         }
-        if($query){
-            $query->addFilter('terms', array('store_id' => $this->getProductStoreId()));   
-        }
-        
         return $query;
     }
 }

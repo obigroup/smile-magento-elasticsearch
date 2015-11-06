@@ -19,28 +19,54 @@
 class Smile_ElasticSearch_Model_Resource_Catalog_Product_Collection extends Mage_Catalog_Model_Resource_Product_Collection
 {
     /**
-     * @var Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch Search engine.
+     * Search engine.
+     *
+     * @var Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch
      */
     protected $_engine;
 
-
+    /**
+     * Current search query.
+     *
+     * @var Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abstract
+     */
     protected $_searchEngineQuery = null;
 
     /**
-     * @var array Faceted data.
+     * Loaded facets.
+     *
+     * @var array
      */
-    protected $_facetedData = array();
-
+    protected $_facets = array();
 
     /**
-     * @var array Search entity ids.
+     * Search entity ids.
+     *
+     * @var array
      */
     protected $_searchedEntityIds = array();
 
     /**
-     * @var array Sort by definition.
+     * Sort by definition.
+     *
+     * @var array
      */
     protected $_sortBy = array();
+
+    /**
+     * Count of products by attrubute set.
+     *
+     * @var array
+     */
+    protected $_productCountBySetId = null;
+
+
+    /**
+     * Indicates if the collection is spellchecked or not
+     *
+     * @var boolean
+     */
+    protected $_isSpellChecked = false;
 
     /**
      * Stores query text filter.
@@ -61,15 +87,47 @@ class Smile_ElasticSearch_Model_Resource_Catalog_Product_Collection extends Mage
      *
      * @param string $field Facet to be retrieved
      *
+     * @deprecated
+     *
      * @return array
      */
     public function getFacetedData($field)
     {
-        if (array_key_exists($field, $this->_facetedData)) {
-            return $this->_facetedData[$field];
+        $facetData = array();
+
+        if (is_null($this->_totalRecords)) {
+            $this->getSize();
         }
 
-        return array();
+        $facet = $this->getFacet($field);
+
+        if ($facet) {
+            $facetData = $facet->getItems();
+        }
+
+        return $facetData;
+    }
+
+    /**
+     * Return the facet object loaded during the search. False if not exists or not loaded yet.
+     *
+     * @param string $field Facet to be retrieved
+     *
+     * @return NULL|Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Facet_Abstract
+     */
+    public function getFacet($field)
+    {
+        $facet = null;
+
+        if (is_null($this->_totalRecords)) {
+            $this->getSize();
+        }
+
+        if (array_key_exists($field, $this->_facets)) {
+            $facet = $this->_facets[$field];
+        }
+
+        return $facet;
     }
 
     /**
@@ -80,7 +138,24 @@ class Smile_ElasticSearch_Model_Resource_Catalog_Product_Collection extends Mage
     public function getSize()
     {
         if (is_null($this->_totalRecords)) {
-            $this->_beforeLoad();
+            $query = clone $this->getSearchEngineQuery();
+
+            $query->setPageParams(0, 0);
+
+            if ($this->getStoreId()) {
+                $store = Mage::app()->getStore($this->getStoreId());
+                $this->_searchEngineQuery->setLanguageCode(Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($store));
+            }
+
+            $query->addFilter('terms', array('store_id' => $this->getStoreId()));
+
+            $result = $query->search();
+            $this->_totalRecords = isset($result['total_count']) ? $result['total_count'] : null;
+            if (isset($result['facets'])) {
+                $this->_facets = array_merge($this->_facets, $result['facets']);
+            }
+
+            $this->_isSpellChecked = $query->isSpellchecked();
         }
 
         return $this->_totalRecords;
@@ -111,7 +186,6 @@ class Smile_ElasticSearch_Model_Resource_Catalog_Product_Collection extends Mage
     public function setOrder($attribute, $dir = self::SORT_ORDER_DESC)
     {
         $this->_sortBy[] = array($attribute => $dir);
-
         return $this;
     }
 
@@ -147,12 +221,17 @@ class Smile_ElasticSearch_Model_Resource_Catalog_Product_Collection extends Mage
         $this->_prepareQuery();
 
         $ids = array();
+        if (!empty($this->_facets)) {
+            $this->getSearchEngineQuery()->resetFacets();
+        }
         $result = $this->getSearchEngineQuery()->search();
 
         $ids = isset($result['ids']) ? $result['ids'] : array();
-        $this->_facetedData = isset($result['faceted_data']) ? $result['faceted_data'] : array();
+        if (isset($result['facets'])) {
+            $this->_facets = array_merge($this->_facets, $result['facets']);
+        }
         $this->_totalRecords = isset($result['total_count']) ? $result['total_count'] : null;
-        $this->_isSpellChecked = isset($result['is_spellchecked']) ? $result['is_spellchecked'] : false;
+        $this->_isSpellChecked = $this->getSearchEngineQuery()->isSpellchecked();
 
         if (empty($ids)) {
             $ids = array(0); // Fix for no result
@@ -213,6 +292,50 @@ class Smile_ElasticSearch_Model_Resource_Catalog_Product_Collection extends Mage
      */
     public function isSpellchecked()
     {
-        return $this->getSearchEngineQuery()->isSpellchecked();
+        return $this->_isSpellChecked;
     }
+
+    /**
+     * Get product count by attribute set id.
+     *
+     * @return array
+     */
+    public function getProductCountBySetId()
+    {
+        if ($this->_productCountBySetId == null) {
+
+            $searchQuery = clone $this->getSearchEngineQuery();
+
+            $searchQuery->resetFacets()
+                ->setQueryType(null);
+
+            if ($this->getStoreId()) {
+                $searchQuery->addFilter('terms', array('store_id' => $this->getStoreId()));
+            }
+
+            $facetMaxSize = Mage::getResourceModel('eav/entity_attribute_set_collection')
+                ->getSize();
+
+            $options = array('field' => 'attribute_set_id', 'size' => $facetMaxSize);
+            $searchQuery->addFacet('attribute_set_id', 'terms', $options);
+
+            $searchQuery->setPageParams(0, 0);
+            $response = $searchQuery->search();
+
+            $this->_productCountBySetId = $response['facets']['attribute_set_id']->getItems();
+        }
+
+        return $this->_productCountBySetId;
+    }
+
+    /**
+     * Retrieve unique attribute set ids in collection
+     *
+     * @return array
+     */
+    public function getSetIds()
+    {
+        return array_keys($this->getProductCountBySetId());
+    }
+
 }

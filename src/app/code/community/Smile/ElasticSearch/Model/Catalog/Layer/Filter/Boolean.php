@@ -19,34 +19,12 @@
 class Smile_ElasticSearch_Model_Catalog_Layer_Filter_Boolean extends Smile_ElasticSearch_Model_Catalog_Layer_Filter_Attribute
 {
     /**
-     * Returns facets data of current attribute.
+     * Indicates if the filters has more value than what have been currently fetch.
      *
-     * @return array
+     * @return boolean
      */
-    protected function _getFacets()
+    public function hasOthers()
     {
-        $facets = parent::_getFacets();
-        $result = array();
-        foreach ($facets as $value => $count) {
-            $key = 0; // false by default
-            if ($value === 'true' || $value === 'T' || $value === '1' || $value === 1 || $value === true) {
-                $key = 1;
-            }
-            $result[$key] = $count;
-        }
-
-        return $result;
-    }
-
-    /**
-     * Checks if given filter is valid before being applied to product collection.
-     *
-     * @param string $filter Filter to be validated
-     *
-     * @return bool
-     */
-    protected function _isValidFilter($filter)
-    {
-        return $filter === '0' || $filter === '1' || false === $filter || true === $filter;
+        return false;
     }
 }

@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<!-- 
+<!--
 /**
  * Module specific editable configguration
  *
@@ -16,7 +16,7 @@
  * @author    Aurelien FOUCRET <aurelien.foucret@smile.fr>
  * @copyright 2013 Smile
  * @license   Apache License Version 2.0
- */ 
+ */
  -->
 <config>
    <sections>
@@ -101,17 +101,6 @@
                             <validate>required-entry validate-digits</validate>
                             <depends><engine>smile_elasticsearch/engine_elasticsearch</engine></depends>
                         </elasticsearch_number_of_replicas>
-                        <elasticsearch_facets_max_size translate="label comment" module="smile_elasticsearch">
-                            <label>Facets Max Size</label>
-                            <frontend_type>text</frontend_type>
-                            <comment>Max number of values returned by a facet query.</comment>
-                            <sort_order>59</sort_order>
-                            <show_in_default>1</show_in_default>
-                            <show_in_website>1</show_in_website>
-                            <show_in_store>1</show_in_store>
-                            <validate>required-entry validate-greater-than-zero validate-digits</validate>
-                            <depends><engine>smile_elasticsearch/engine_elasticsearch</engine></depends>
-                        </elasticsearch_facets_max_size>
                         <elasticsearch_enable_icu_folding translate="label comment" module="smile_elasticsearch">
                             <label>Enable ICU Folding Token Filter</label>
                             <frontend_type>select</frontend_type>
@@ -133,7 +122,7 @@
                 </search>
             </groups>
         </catalog>
-        
+
         <elasticsearch_advanced_search_settings translate="label" module="smile_searchandisingsuite">
             <class>separator-top</class>
             <label>Advanced search settings</label>
@@ -147,12 +136,20 @@
                 <fulltext_relevancy translate="label">
                     <label>Fulltext relevancy</label>
                     <frontend_type>text</frontend_type>
-                    <sort_order>100</sort_order>
+                    <sort_order>50</sort_order>
                     <show_in_default>1</show_in_default>
                     <show_in_website>1</show_in_website>
                     <show_in_store>1</show_in_store>
                     <fields>
-                        <search_in_category_name translate="label comment" module="smile_elasticsearch">
+                        <search_in_category_name_heading translate="label">
+                            <label>Search in categories</label>
+                            <frontend_model>adminhtml/system_config_form_field_heading</frontend_model>
+                            <sort_order>10</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                        </search_in_category_name_heading>
+                        <search_in_category_name translate="label" module="smile_elasticsearch">
                             <label>Enable Search in categories name</label>
                             <frontend_type>select</frontend_type>
                             <source_model>adminhtml/system_config_source_yesno</source_model>
@@ -161,7 +158,7 @@
                             <show_in_website>1</show_in_website>
                             <show_in_store>1</show_in_store>
                         </search_in_category_name>
-                        <search_in_category_name_weight translate="label comment" module="smile_elasticsearch">
+                        <search_in_category_name_weight translate="label" module="smile_elasticsearch">
                             <label>Category name weight</label>
                             <frontend_type>text</frontend_type>
                             <validate>required-entry</validate>
@@ -172,44 +169,6 @@
                             <show_in_store>1</show_in_store>
                             <depends><search_in_category_name>1</search_in_category_name></depends>
                         </search_in_category_name_weight>
-                        <search_in_category_name_enable_fuzzy translate="label comment" module="smile_elasticsearch">
-                            <label>Enable fuzzy search for category name</label>
-                            <frontend_type>select</frontend_type>
-                            <source_model>adminhtml/system_config_source_yesno</source_model>
-                            <sort_order>31</sort_order>
-                            <show_in_default>1</show_in_default>
-                            <show_in_website>1</show_in_website>
-                            <show_in_store>1</show_in_store>
-                            <depends><search_in_category_name>1</search_in_category_name></depends>
-                        </search_in_category_name_enable_fuzzy>
-                        <search_in_category_name_fuzziness translate="label comment" module="smile_elasticsearch">
-                            <label>Category name fuzziness value</label>
-                            <frontend_type>text</frontend_type>
-                            <sort_order>32</sort_order>
-                            <validate>required-entry</validate>
-                            <frontend_class>validate-number validate-number-range number-range-0-1</frontend_class>
-                            <show_in_default>1</show_in_default>
-                            <show_in_website>1</show_in_website>
-                            <show_in_store>1</show_in_store>
-                            <depends><search_in_category_name>1</search_in_category_name></depends>
-                            <comment>
-                                <![CDATA[A number between 0 and 1. See doc <a href="http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/common-options.html#_string_fields" target="_blank">here</a> for more information']]>
-                            </comment>
-                        </search_in_category_name_fuzziness>
-                        <search_in_category_name_prefix_length translate="label comment" module="smile_elasticsearch">
-                            <label>Category name fuzziness prefix length</label>
-                            <frontend_type>text</frontend_type>
-                            <sort_order>33</sort_order>
-                            <validate>required-entry</validate>
-                            <frontend_class>validate-digits validate-digits-range digits-range-0-9</frontend_class>
-                            <show_in_default>1</show_in_default>
-                            <show_in_website>1</show_in_website>
-                            <show_in_store>1</show_in_store>
-                            <depends><search_in_category_name>1</search_in_category_name></depends>
-                            <comment>
-                                <![CDATA[A integer between 0 and 9. See doc <a href="http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/common-options.html#_string_fields" target="_blank">here</a> for more information']]>
-                            </comment>
-                        </search_in_category_name_prefix_length>
                         <search_in_category_name_use_in_autocomplete>
                             <label>Use in autocomplete</label>
                             <frontend_type>select</frontend_type>
@@ -220,18 +179,236 @@
                             <show_in_store>1</show_in_store>
                             <depends><search_in_category_name>1</search_in_category_name></depends>
                         </search_in_category_name_use_in_autocomplete>
+                        <phrase_match_heading translate="label">
+                            <label>Phrase match configuration</label>
+                            <frontend_model>adminhtml/system_config_form_field_heading</frontend_model>
+                            <sort_order>35</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                        </phrase_match_heading>
+                        <enable_phrase_match>
+                            <label>Enable boost on phrase match</label>
+                            <frontend_type>select</frontend_type>
+                            <source_model>adminhtml/system_config_source_yesno</source_model>
+                            <sort_order>36</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                        </enable_phrase_match>
+                        <phrase_match_boost_value>
+                            <label>Phrase match boost value</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>37</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-number validate-greater-than-zero</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><enable_phrase_match>1</enable_phrase_match></depends>
+                        </phrase_match_boost_value>
+                        <search_fuzziness_heading translate="label">
+                            <label>Search fuzziness configuration</label>
+                            <frontend_model>adminhtml/system_config_form_field_heading</frontend_model>
+                            <sort_order>40</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                        </search_fuzziness_heading>
+                        <enable_fuzziness>
+                            <label>Enable fuzziness</label>
+                            <frontend_type>select</frontend_type>
+                            <source_model>adminhtml/system_config_source_yesno</source_model>
+                            <sort_order>41</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                        </enable_fuzziness>
+                        <fuzziness_value translate="label comment">
+                            <label>Fuzziness value</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>42</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-number validate-number-range number-range-0-1</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><enable_fuzziness>1</enable_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A number between 0 and 1. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information]]>
+                            </comment>
+                        </fuzziness_value>
+                        <fuzziness_prefix_length>
+                            <label>Fuzziness prefix length</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>43</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-digits validate-digits-range validate-zero-or-greater</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><enable_fuzziness>1</enable_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A integer between greater or equal than 0. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information]]>
+                            </comment>
+                        </fuzziness_prefix_length>
+                        <fuzziness_max_expansions>
+                            <label>Fuzziness max. expansions</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>44</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-digits validate-digits-range validate-zero-or-greater</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><enable_fuzziness>1</enable_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A integer between greater or equal than 0. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information]]>
+                            </comment>
+                        </fuzziness_max_expansions>
+                        <phonetic_search_heading translate="label">
+                            <label>Phonetic search configuration</label>
+                            <frontend_model>adminhtml/system_config_form_field_heading</frontend_model>
+                            <sort_order>50</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                        </phonetic_search_heading>
+                        <enable_phonetic_search>
+                            <label>Enable phonetic search</label>
+                            <frontend_type>select</frontend_type>
+                            <source_model>adminhtml/system_config_source_yesno</source_model>
+                            <sort_order>51</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <comment>
+                                <![CDATA[<comment>Require Phonetic analysis plugin installation: https://github.com/elastic/elasticsearch-analysis-phonetic</comment>]]>
+                            </comment>
+                        </enable_phonetic_search>
+                        <enable_phonetic_search_fuzziness>
+                            <label>Enable phonetic fuzziness</label>
+                            <frontend_type>select</frontend_type>
+                            <source_model>adminhtml/system_config_source_yesno</source_model>
+                            <sort_order>52</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><enable_phonetic_search>1</enable_phonetic_search></depends>
+                        </enable_phonetic_search_fuzziness>
+                        <phonetic_search_fuzziness_value>
+                            <label>Phonetic fuzziness value</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>53</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-number validate-number-range number-range-0-1</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><enable_phonetic_search_fuzziness>1</enable_phonetic_search_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A number between 0 and 1. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information']]>
+                            </comment>
+                        </phonetic_search_fuzziness_value>
+                        <phonetic_search_fuzziness_prefix_length>
+                            <label>Phonetic fuzziness prefix length</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>54</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-digits validate-digits-range validate-zero-or-greater</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><enable_phonetic_search_fuzziness>1</enable_phonetic_search_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A integer between greater or equal than 0. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information']]>
+                            </comment>
+                        </phonetic_search_fuzziness_prefix_length>
+                        <phonetic_search_fuzziness_max_expansions>
+                            <label>Phonetic fuzziness max. expansions</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>55</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-digits validate-digits-range validate-zero-or-greater</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><enable_phonetic_search_fuzziness>1</enable_phonetic_search_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A integer between greater or equal than 0. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information']]>
+                            </comment>
+                        </phonetic_search_fuzziness_max_expansions>
+                        <autocomplete_fuzziness_heading translate="label">
+                            <label>Autocomplete fuzziness configuration</label>
+                            <frontend_model>adminhtml/system_config_form_field_heading</frontend_model>
+                            <sort_order>60</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                        </autocomplete_fuzziness_heading>
+                        <autocomplete_enable_fuzziness>
+                            <label>Enable fuzziness in autocomplete</label>
+                            <frontend_type>select</frontend_type>
+                            <source_model>adminhtml/system_config_source_yesno</source_model>
+                            <sort_order>61</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                        </autocomplete_enable_fuzziness>
+                        <autocomplete_fuzziness_value translate="label comment">
+                            <label>Autocomplete fuzziness value</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>62</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-number validate-number-range number-range-0-1</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><autocomplete_enable_fuzziness>1</autocomplete_enable_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A number between 0 and 1. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information']]>
+                            </comment>
+                        </autocomplete_fuzziness_value>
+                        <autocomplete_fuzziness_prefix_length>
+                            <label>Autocomplete fuzziness prefix length</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>63</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-digits validate-digits-range validate-zero-or-greater</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><autocomplete_enable_fuzziness>1</autocomplete_enable_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A integer between greater or equal than 0. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information']]>
+                            </comment>
+                        </autocomplete_fuzziness_prefix_length>
+                        <autocomplete_fuzziness_max_expansions>
+                            <label>Autocomplete fuzziness max. expansions</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>64</sort_order>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-digits validate-digits-range validate-zero-or-greater</frontend_class>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <depends><autocomplete_enable_fuzziness>1</autocomplete_enable_fuzziness></depends>
+                            <comment>
+                                <![CDATA[A integer between greater or equal than 0. See doc <a href='https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-fuzzy-query.html#_parameters_7' target='_blank'>here</a> for more information']]>
+                            </comment>
+                        </autocomplete_fuzziness_max_expansions>
                     </fields>
                 </fulltext_relevancy>
                 <popular_terms_autocomplete translate="label">
                     <label>Popular Searches Autocomplete</label>
                     <frontend_type>text</frontend_type>
-                    <sort_order>100</sort_order>
+                    <sort_order>150</sort_order>
                     <show_in_default>1</show_in_default>
                     <show_in_website>1</show_in_website>
                     <show_in_store>1</show_in_store>
                     <fields>
                         <max_size translate="label">
-                            <label>Popular search terms max size</label>
+                            <label>Max size</label>
                             <frontend_type>text</frontend_type>
                             <sort_order>1</sort_order>
                             <show_in_default>1</show_in_default>
@@ -245,7 +422,7 @@
                 <product_autocomplete translate="label">
                     <label>Product Autocomplete</label>
                     <frontend_type>text</frontend_type>
-                    <sort_order>110</sort_order>
+                    <sort_order>200</sort_order>
                     <show_in_default>1</show_in_default>
                     <show_in_website>1</show_in_website>
                     <show_in_store>1</show_in_store>
@@ -262,10 +439,30 @@
                         </max_size>
                     </fields>
                 </product_autocomplete>
+                <attribute_autocomplete translate="label">
+                    <label>Attribute Autocomplete</label>
+                    <frontend_type>text</frontend_type>
+                    <sort_order>250</sort_order>
+                    <show_in_default>1</show_in_default>
+                    <show_in_website>1</show_in_website>
+                    <show_in_store>1</show_in_store>
+                    <fields>
+                        <max_size translate="label">
+                            <label>Max size</label>
+                            <frontend_type>text</frontend_type>
+                            <sort_order>1</sort_order>
+                            <show_in_default>1</show_in_default>
+                            <show_in_website>1</show_in_website>
+                            <show_in_store>1</show_in_store>
+                            <validate>required-entry</validate>
+                            <frontend_class>validate-digits</frontend_class>
+                        </max_size>
+                    </fields>
+                </attribute_autocomplete>
                 <category_autocomplete translate="label">
                     <label>Category Autocomplete</label>
                     <frontend_type>text</frontend_type>
-                    <sort_order>120</sort_order>
+                    <sort_order>300</sort_order>
                     <show_in_default>1</show_in_default>
                     <show_in_website>1</show_in_website>
                     <show_in_store>1</show_in_store>

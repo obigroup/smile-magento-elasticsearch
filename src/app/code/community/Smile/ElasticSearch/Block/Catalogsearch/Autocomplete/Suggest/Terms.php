@@ -19,9 +19,41 @@
 class Smile_ElasticSearch_Block_Catalogsearch_Autocomplete_Suggest_Terms extends Mage_Core_Block_Template
 {
     /**
+     * Loaded suggest data.
+     *
      * @var null|array
      */
     protected $_suggestData = null;
+
+    /**
+     * Block cache key
+     *
+     * @return string
+     */
+    public function getCacheKey()
+    {
+        return __CLASS__ . md5($this->_getQuery()) . '_' . Mage::app()->getStore()->getId();
+    }
+
+    /**
+     * Block cache lifetime
+     *
+     * @return int
+     */
+    public function getCacheLifetime()
+    {
+        return Mage_Core_Model_Cache::DEFAULT_LIFETIME;
+    }
+
+    /**
+     * Block cache tags
+     *
+     * @return array
+     */
+    public function getCacheTags()
+    {
+        return array(Mage_CatalogSearch_Model_Query::CACHE_TAG);
+    }
 
     /**
      * Retrive the list of terms that would be suggested to the user
@@ -65,4 +97,14 @@ class Smile_ElasticSearch_Block_Catalogsearch_Autocomplete_Suggest_Terms extends
         return Mage::getStoreConfig('elasticsearch_advanced_search_settings/popular_terms_autocomplete/max_size');
     }
 
+
+    /**
+     * Return the string query we want to retrive suggests for
+     *
+     * @return string
+     */
+    protected function _getQuery()
+    {
+        return $this->helper('catalogsearch')->getQueryText();
+    }
 }

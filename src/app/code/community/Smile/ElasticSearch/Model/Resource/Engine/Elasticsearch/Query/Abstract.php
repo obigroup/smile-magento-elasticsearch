@@ -19,59 +19,88 @@
 abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abstract
     extends Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Abstract
 {
+    /**
+     * @var string
+     */
     const DEFAULT_ROWS_LIMIT = 10000;
 
     /**
+     * @var int
+     */
+    const SORT_ORDER_LAST = PHP_INT_MAX;
+
+    /**
+     * Magento query type (eg: product_search_layer).
+     *
      * @var string
      */
     protected $_queryType = 'default';
 
 
     /**
+     * ES query type (eg. product, category, ...)
+     *
      * @var string
      */
     protected $_type;
 
     /**
+     * Filter applied to the query.
+     *
      * @var array
      */
     protected $_filters = array();
 
     /**
+     * Facets applied to the query.
+     *
      * @var array
      */
     protected $_facets = array();
 
     /**
+     * Pagination of the query.
+     *
      * @var array
      */
     protected $_page = array('from' => 0, 'size' => self::DEFAULT_ROWS_LIMIT);
 
     /**
+     * Fulltext search query part.
+     *
      * @var string
      */
     protected $_fulltextQuery = '';
 
     /**
+     * Sort order of the query
+     *
      * @var array
      */
     protected $_sort = array();
 
     /**
+     * Query language code
+     *
      * @var string
      */
     protected $_languageCode;
 
     /**
+     * Available facets models
+     *
      * @var array
      */
     protected $_facetModelNames = array(
        'terms'      => 'smile_elasticsearch/engine_elasticsearch_query_facet_terms',
+       'termsStats' => 'smile_elasticsearch/engine_elasticsearch_query_facet_termsStats',
        'histogram'  => 'smile_elasticsearch/engine_elasticsearch_query_facet_histogram',
        'queryGroup' => 'smile_elasticsearch/engine_elasticsearch_query_facet_queryGroup',
     );
 
     /**
+     * Available filter models
+     *
      * @var array
      */
     protected $_filterModelNames = array(
@@ -81,6 +110,8 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
     );
 
     /**
+     * Indicates if the result have been spellchecked
+     *
      * @var bool
      */
     protected $_isSpellChecked = false;
@@ -107,7 +138,7 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
     {
         if ($this->_languageCode == null) {
             $currentStore        = Mage::app()->getStore();
-            $this->_languageCode = Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($store);
+            $this->_languageCode = Mage::helper('smile_elasticsearch')->getLanguageCodeByStore($currentStore);
         }
         return $this->_languageCode;
     }
@@ -180,6 +211,9 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
         Mage::dispatchEvent('smile_elasticsearch_query_assembled', array('query_data' => $eventData));
         Varien_Profiler::stop('ES:ASSEMBLE:QUERY:OBSERVERS');
         $query = $eventData->getQuery();
+        if ($this->getConfig('enable_debug_mode')) {
+            Mage::log(json_encode($query), Zend_Log::DEBUG, 'es-queries.log');
+        }
 
         Varien_Profiler::start('ES:EXECUTE:QUERY');
         $response = $this->getClient()->search($query);
@@ -201,11 +235,15 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
 
             if (isset($response['facets'])) {
                 foreach ($this->_facets as $facetName => $facetModel) {
+                    $currentFacet = clone $facetModel;
                     if ($facetModel->isGroup()) {
+                        $currentFacet->setResponse($response['facets']);
                         $result['faceted_data'][$facetName] = $facetModel->getItems($response['facets']);
                     } else if (isset($response['facets'][$facetName])) {
+                        $currentFacet->setResponse($response['facets'][$facetName]);
                         $result['faceted_data'][$facetName] = $facetModel->getItems($response['facets'][$facetName]);
                     }
+                    $result['facets'][$facetName] = $currentFacet;
                 }
             }
         } else {
@@ -334,13 +372,24 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
     }
 
     /**
+     * Get the ES Query
+     *
+     * @return array
+     */
+    public function getRawQuery()
+    {
+        return $this->_assembleQuery();
+    }
+
+
+    /**
      * Transform the query into an ES syntax compliant array.
      *
      * @return array
      */
     protected function _assembleQuery()
     {
-        $query = array('index' => $this->getAdapter()->getCurrentIndex()->getCurrentName(), 'type'  => $this->getType());
+        $query = array('index' => $this->getAdapter()->getCurrentIndex()->getCurrentName(), 'type' => $this->getType());
         $query['body']['query']['filtered']['query']['bool']['must'][] = $this->_prepareFulltextCondition();
 
         foreach ($this->_facets as $facetName => $facet) {
@@ -392,10 +441,15 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
         }
         // Patch : score not computed when using another sort order than score
         //         as primary sort order
-        $query['body']['fields'] = array('entity_id');
-        $query['body']['track_scores'] = true;
-        $query['body']['sort'] = $this->_prepareSortCondition();
-        $query['body'] = array_merge($query['body'], $this->_page);
+
+        if (isset($this->_page['size']) && $this->_page['size'] > 0) {
+            $query['body']['fields'] = array('entity_id');
+            $query['body']['track_scores'] = true;
+            $query['body']['sort'] = $this->_prepareSortCondition();
+            $query['body'] = array_merge($query['body'], $this->_page);
+        } else {
+            $query['body'] = array_merge($query['body'], $this->_page);
+        }
 
         return $query;
     }
@@ -409,6 +463,7 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
     {
         $result = array();
         $hasRelevance = false;
+        $category = Mage::registry('current_category');
 
         foreach ($this->_sort as $sort) {
             $_sort = each($sort);
@@ -419,10 +474,7 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
                 // Score has to be reversed
                 $hasRelevance = true;
             } elseif ($sortField == 'position') {
-                $category = Mage::registry('current_category');
-                if ($category) {
-                    $sortField = 'position_category_' . Mage::registry('current_category')->getId();
-                } else {
+                if ($category == null) {
                     $sortField = '_score';
                     $sortType = $sortType == 'asc' ? 'desc' : 'asc';
                 }
@@ -434,9 +486,19 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
                 $sortField = $this->getMapping()->getFieldName($sortField, $this->getLanguageCode(), 'sort');
             }
 
-            $result[] = array(
-                $sortField => array('order' => trim(strtolower($sortType)), 'missing' => '_last', 'ignore_unmapped' => true)
+            $sortDefinition = array(
+                'order' => trim(strtolower($sortType)),
+                'missing' => self::SORT_ORDER_LAST - 1,
+                'ignore_unmapped' => true
             );
+
+            if ($sortField == 'position' && $category != null) {
+                $sortDefinition['nested_path'] = 'category_position';
+                $sortDefinition['nested_filter'] = array(
+                    'term' => array('category_id' => $category->getId())
+                );
+            }
+            $result[] = array($sortField => $sortDefinition);
         }
 
         if (!$hasRelevance) {
@@ -494,11 +556,14 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
     /**
      * Retrieves searchable fields according to text query.
      *
+     * @param string $searchType Type of search currentlty used.
+     * @param string $analyzer   Allow to force the analyzer used for the field (whitespace, ...).
+     *
      * @return array
      */
-    public function getSearchFields()
+    public function getSearchFields($searchType, $analyzer = null)
     {
-        return $this->getMapping()->getSearchFields($this->getLanguageCode());
+        return $this->getMapping()->getSearchFields($this->getLanguageCode(), $searchType, $analyzer);
     }
 
     /**
@@ -595,5 +660,16 @@ abstract class Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abs
     public function isSpellchecked()
     {
         return $this->_isSpellChecked;
+    }
+
+    /**
+     * Allow to reset the facet for a query.
+     *
+     * @return Smile_ElasticSearch_Model_Resource_Engine_Elasticsearch_Query_Abstract
+     */
+    public function resetFacets()
+    {
+        $this->_facets = array();
+        return $this;
     }
 }
